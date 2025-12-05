@@ -23,6 +23,7 @@ db.run(`
         contentHash TEXT NOT NULL,
         contentType TEXT NOT NULL,
         contentLink TEXT NOT NULL,
+        parsed INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (sourceId) REFERENCES Source(id)
     )
 `);
@@ -93,35 +94,36 @@ async function processSource(source: Source): Promise<void> {
         const extension = contentType === 'application/json' ? 'json' : 'html';
         const contentLink = await saveContent(source.sourceType, source.id, content, extension);
         
-        // Insert into SourceFetched
-        db.run(
-            `INSERT INTO SourceFetched (sourceId, fetchedAt, contentHash, contentType, contentLink) VALUES (?, ?, ?, ?, ?)`,
-            [
-                source.id,
-                fetchedAt.toISOString(),
-                contentHash,
-                contentType,
-                contentLink
-            ]
-        );
-        
-        // Update Source record
-        db.run(
-            `UPDATE Source SET 
-                lastFetched = ?, 
-                lastSaved = ?, 
-                lastSavedContentHash = ?, 
-                savedCount = savedCount + 1,
-                nextFetch = ?
-            WHERE id = ?`,
-            [
-                fetchedAt.toISOString(),
-                fetchedAt.toISOString(),
-                contentHash,
-                new Date(fetchedAt.getTime() + source.fetchFrequency * 3600000).toISOString(),
-                source.id
-            ]
-        );
+        // Insert into SourceFetched and update Source in a transaction
+        db.transaction(() => {
+            db.run(
+                `INSERT INTO SourceFetched (sourceId, fetchedAt, contentHash, contentType, contentLink, parsed) VALUES (?, ?, ?, ?, ?, 0)`,
+                [
+                    source.id,
+                    fetchedAt.toISOString(),
+                    contentHash,
+                    contentType,
+                    contentLink
+                ]
+            );
+            
+            db.run(
+                `UPDATE Source SET 
+                    lastFetched = ?, 
+                    lastSaved = ?, 
+                    lastSavedContentHash = ?, 
+                    savedCount = savedCount + 1,
+                    nextFetch = ?
+                WHERE id = ?`,
+                [
+                    fetchedAt.toISOString(),
+                    fetchedAt.toISOString(),
+                    contentHash,
+                    new Date(fetchedAt.getTime() + source.fetchFrequency * 3600000).toISOString(),
+                    source.id
+                ]
+            );
+        })();
         
         console.log(`  Saved: ${contentLink}`);
     } catch (error) {

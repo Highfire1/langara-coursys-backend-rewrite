@@ -18,7 +18,7 @@ let terms = [];
 
 terms.push('199920'); terms.push('199930');
 
-for (let year = 2000; year <= 2026; year++) {
+for (let year = 2000; year <= 2025; year++) {
     for (const term of ['10', '20', '30']) {
         terms.push(`${year}${term}`);
     }

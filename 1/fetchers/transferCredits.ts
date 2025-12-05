@@ -111,7 +111,14 @@ async function getSubjectPage(
         body: formData
     });
     
-    return await response.json() as PageResponse;
+    try {
+        return await response.json() as PageResponse;
+    } catch (error) {
+        console.error("[TransferCredits] Failed to parse JSON response:", error);
+        const responseText = await response.text();
+        console.error("[TransferCredits] Response text:", responseText);
+        throw new Error("[TransferCredits] Unable to parse response as JSON");
+    }
 }
 
 // Get all transfer agreements for a subject (all pages)

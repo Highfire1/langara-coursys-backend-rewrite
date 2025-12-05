@@ -25,7 +25,7 @@ export interface Source {
 }
 
 
-interface SourceFetched {
+export interface SourceFetched {
     id: number;
     sourceId: number;
     fetchedAt: Date;
@@ -34,5 +34,7 @@ interface SourceFetched {
 
     contentType: 'text/html' | 'application/json';
     contentLink: string; // link to where the content is stored e.g. file://path/to/file or s3://bucket/key
+
+    parsed: boolean;
 }
 
