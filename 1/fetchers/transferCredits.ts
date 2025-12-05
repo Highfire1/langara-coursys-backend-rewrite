@@ -1,7 +1,6 @@
 import { FetchResult } from "./types.ts";
 
 const BASE_URL = "https://www.bctransferguide.ca";
-const WS_BASE_URL = "https://ws.bctransferguide.ca";
 
 const headers = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -17,12 +16,6 @@ const headers = {
     "Upgrade-Insecure-Requests": "1",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0"
 };
-
-interface TransferSubject {
-    id: number;
-    subject: string;
-    title: string;
-}
 
 interface TransferAgreement {
     Id: number;
@@ -50,11 +43,22 @@ interface PageResponse {
     courses: CourseData[];
 }
 
-// Get the wpnonce from the homepage HTML
-// Note: This reads the nonce from the static HTML. If it requires JS execution, 
-// you'll need to use browser automation (playwright/puppeteer)
+// Cached wpnonce - expires after 24 hours, we refresh at 23 hours to be safe
+let cachedNonce: string | null = null;
+let nonceFetchedAt: number = 0;
+const NONCE_TTL_MS = 23 * 60 * 60 * 1000; // 23 hours in milliseconds
+
+// Get the wpnonce from the homepage HTML (with caching)
 async function getWPNonce(): Promise<string> {
-    // The nonce is embedded in the HTML: <div id="c2c-home-filters" nonce="911a679700" ...>
+    const now = Date.now();
+    
+    // Return cached nonce if still valid
+    if (cachedNonce && (now - nonceFetchedAt) < NONCE_TTL_MS) {
+        return cachedNonce;
+    }
+    
+    // Fetch fresh nonce
+    console.log("[TransferCredits] Fetching fresh wpnonce...");
     const response = await fetch(BASE_URL, { headers });
     const html = await response.text();
     
@@ -63,26 +67,29 @@ async function getWPNonce(): Promise<string> {
         throw new Error("[TransferCredits] Could not find wpnonce in homepage");
     }
     
-    return nonceMatch[1];
+    cachedNonce = nonceMatch[1];
+    nonceFetchedAt = now;
+    
+    return cachedNonce;
 }
 
-// Get list of subjects for an institution
-async function getSubjectList(institutionId: number = 15): Promise<TransferSubject[]> {
-    const url = `${WS_BASE_URL}/api/custom/ui/v1.7/agreementws/GetSubjects?institutionID=${institutionId}&sending=true`;
-    
-    const response = await fetch(url, { headers });
-    const data = await response.json() as Array<{ Id: number; Code: string; Title: string }>;
-    
-    return data.map(r => ({
-        id: r.Id,
-        subject: r.Code,
-        title: r.Title
-    }));
+// Parse sourceIdentifier format: "subjectId:subjectCode:subjectTitle"
+function parseSourceIdentifier(sourceIdentifier: string): { id: number; code: string; title: string } {
+    const parts = sourceIdentifier.split(':');
+    if (parts.length < 3) {
+        throw new Error(`[TransferCredits] Invalid sourceIdentifier format: ${sourceIdentifier}`);
+    }
+    return {
+        id: parseInt(parts[0]),
+        code: parts[1],
+        title: parts.slice(2).join(':') // In case title contains colons
+    };
 }
 
 // Get a single page of transfer agreements for a subject
 async function getSubjectPage(
-    subject: TransferSubject,
+    subjectId: number,
+    subjectTitle: string,
     page: number,
     wpNonce: string,
     institution: string = "LANG",
@@ -94,8 +101,8 @@ async function getSubjectPage(
         institutionCode: institution,
         pageNumber: page.toString(),
         sender: institutionId.toString(),
-        subjectCode: subject.title,
-        subjectId: subject.id.toString(),
+        subjectCode: subjectTitle,
+        subjectId: subjectId.toString(),
     });
     
     const response = await fetch(url, {
@@ -109,7 +116,9 @@ async function getSubjectPage(
 
 // Get all transfer agreements for a subject (all pages)
 async function getSubjectTransfers(
-    subject: TransferSubject,
+    subjectId: number,
+    subjectCode: string,
+    subjectTitle: string,
     wpNonce: string,
     institution: string = "LANG",
     institutionId: number = 15
@@ -117,7 +126,7 @@ async function getSubjectTransfers(
     const transfers: TransferAgreement[] = [];
     
     // Get first page to determine total pages
-    const firstPage = await getSubjectPage(subject, 1, wpNonce, institution, institutionId);
+    const firstPage = await getSubjectPage(subjectId, subjectTitle, 1, wpNonce, institution, institutionId);
     
     // Extract agreements from first page
     for (const course of firstPage.courses) {
@@ -126,49 +135,41 @@ async function getSubjectTransfers(
     
     // Get remaining pages if any
     for (let pageNum = 2; pageNum <= firstPage.totalPages; pageNum++) {
-        const page = await getSubjectPage(subject, pageNum, wpNonce, institution, institutionId);
+        const page = await getSubjectPage(subjectId, subjectTitle, pageNum, wpNonce, institution, institutionId);
         for (const course of page.courses) {
             transfers.push(...course.agreements);
         }
     }
     
-    console.log(`[TransferCredits] ${subject.subject.padEnd(8)}: ${transfers.length} agreements found`);
+    // console.log(`[TransferCredits] ${subjectCode.padEnd(8)}: ${transfers.length} agreements found`);
     return transfers;
 }
 
 export async function fetchTransferCredits(sourceIdentifier: string): Promise<FetchResult> {
-    // sourceIdentifier is ignored for now (could be used for different institutions)
-    console.log(`[TransferCredits] Starting fetch`);
+    // sourceIdentifier format: "subjectId:subjectCode:subjectTitle"
+    const subject = parseSourceIdentifier(sourceIdentifier);
     
-    // Step 1: Get wpnonce from homepage
-    // TODO: If this doesn't work, implement browser automation to get the nonce
+    // console.log(`[TransferCredits] Fetching transfers for subject: ${subject.code}`);
+    
+    // Get wpnonce from homepage
     const wpNonce = await getWPNonce();
-    console.log(`[TransferCredits] Got wpnonce: ${wpNonce}`);
     
-    // Step 2: Get list of subjects
-    const subjects = await getSubjectList();
-    console.log(`[TransferCredits] Found ${subjects.length} subjects`);
-    
-    // Step 3: Get all transfers for each subject
-    const allTransfers: TransferAgreement[] = [];
-    
-    for (const subject of subjects) {
-        const transfers = await getSubjectTransfers(subject, wpNonce);
-        allTransfers.push(...transfers);
-        
-        // Small delay between subjects to be polite
-        await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    console.log(`[TransferCredits] Total: ${allTransfers.length} transfer agreements`);
+    // Get all transfers for this subject
+    const transfers = await getSubjectTransfers(
+        subject.id,
+        subject.code,
+        subject.title,
+        wpNonce
+    );
     
     // Return as JSON
     const content = JSON.stringify({
         fetchedAt: new Date().toISOString(),
         institution: "LANG",
-        totalAgreements: allTransfers.length,
-        subjects: subjects.length,
-        transfers: allTransfers
+        subject: subject.code,
+        subjectTitle: subject.title,
+        totalAgreements: transfers.length,
+        transfers
     }, null, 2);
     
     return {

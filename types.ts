@@ -11,7 +11,7 @@ Architecture:
 
 export interface Source {
     id: number;
-    sourceType: 'SemesterSearch' | 'SemesterCatalogue' | 'SemesterAttributes' | 'TransferCredits';
+    sourceType: 'SemesterSearch' | 'SemesterCatalogue' | 'SemesterAttributes' | 'TransferCredits' | 'TransferCreditSubjects';
     sourceIdentifier: string;
     fetchFrequency: number; // in hours
 

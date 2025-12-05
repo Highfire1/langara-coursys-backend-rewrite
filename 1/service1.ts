@@ -7,7 +7,7 @@ const db = new Database("database.sqlite", { create: true });
 
 
 interface SourceInfo {
-    sourceCode: 'SemesterSearch' | 'SemesterCatalogue' | 'SemesterAttributes' | 'TransferCredits';
+    sourceCode: 'SemesterSearch' | 'SemesterCatalogue' | 'SemesterAttributes' | 'TransferCredits' | 'TransferCreditSubjects';
     sourceIdentifier: string;
     fetchFrequency: number; // in hours
 }
@@ -28,11 +28,14 @@ terms.push('202610');
 // terms.push('202620');
 // terms.push('202630');
 
+// TransferCreditSubjects fetches the subject list and creates TransferCredits entries for each subject
 sources.push({
-    sourceCode: 'TransferCredits',
+    sourceCode: 'TransferCreditSubjects',
     sourceIdentifier: `all`,
-    fetchFrequency: 24
+    fetchFrequency: 24*7 // weekly
 });
+
+// Note: TransferCredits entries are dynamically created by TransferCreditSubjects fetcher
 
 for (const yt of terms) {
     sources.push({

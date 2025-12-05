@@ -8,7 +8,8 @@ import {
     fetchSemesterSearch,
     fetchSemesterCatalogue,
     fetchSemesterAttributes,
-    fetchTransferCredits
+    fetchTransferCredits,
+    fetchTransferCreditSubjects
 } from "./fetchers/index.ts";
 
 const db = new Database("database.sqlite", { create: true });
@@ -55,6 +56,8 @@ async function fetchSource(source: Source): Promise<FetchResult> {
             return fetchSemesterCatalogue(source.sourceIdentifier);
         case 'SemesterAttributes':
             return fetchSemesterAttributes(source.sourceIdentifier);
+        case 'TransferCreditSubjects':
+            return fetchTransferCreditSubjects(source.sourceIdentifier, db);
         case 'TransferCredits':
             return fetchTransferCredits(source.sourceIdentifier);
         default:
@@ -163,7 +166,7 @@ async function main() {
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
         } else {
-            console.log("No sources due for fetch");
+            console.log("No sources due for fetch. Checking again in 1 minute.");
         }
         
         // Wait before checking again (e.g., 1 minute)
