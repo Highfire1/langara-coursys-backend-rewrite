@@ -13,6 +13,140 @@ import {
 
 const db = new Database("database.sqlite", { create: true });
 
+// Create Transfer table for parsed transfer credit data
+db.run(`
+    CREATE TABLE IF NOT EXISTS Transfer (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sourceId INTEGER NOT NULL,
+        subject TEXT NOT NULL,
+        courseNumber TEXT NOT NULL,
+        source TEXT NOT NULL,
+        sourceCredits REAL,
+        sourceTitle TEXT,
+        destination TEXT NOT NULL,
+        destinationName TEXT NOT NULL,
+        credit TEXT NOT NULL,
+        condition TEXT,
+        effectiveStart TEXT NOT NULL,
+        effectiveEnd TEXT,
+        FOREIGN KEY (sourceId) REFERENCES SourceFetched(id)
+    )
+`);
+
+// Create indexes for common queries
+db.run(`CREATE INDEX IF NOT EXISTS idx_transfer_subject ON Transfer(subject)`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_transfer_destination ON Transfer(destination)`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_transfer_effective_end ON Transfer(effectiveEnd)`);
+
+// Create CourseAttribute table for parsed course attribute data
+db.run(`
+    CREATE TABLE IF NOT EXISTS CourseAttribute (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sourceId INTEGER NOT NULL,
+        subject TEXT NOT NULL,
+        courseCode TEXT NOT NULL,
+        year INTEGER NOT NULL,
+        term INTEGER NOT NULL,
+        attr2AR INTEGER NOT NULL DEFAULT 0,
+        attr2SC INTEGER NOT NULL DEFAULT 0,
+        attrHUM INTEGER NOT NULL DEFAULT 0,
+        attrLSC INTEGER NOT NULL DEFAULT 0,
+        attrSCI INTEGER NOT NULL DEFAULT 0,
+        attrSOC INTEGER NOT NULL DEFAULT 0,
+        attrUT INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(subject, courseCode, year, term),
+        FOREIGN KEY (sourceId) REFERENCES SourceFetched(id)
+    )
+`);
+
+// Create indexes for CourseAttribute
+db.run(`CREATE INDEX IF NOT EXISTS idx_courseattr_subject ON CourseAttribute(subject)`);
+// Create CourseSummary table for parsed catalogue data
+db.run(`
+    CREATE TABLE IF NOT EXISTS CourseSummary (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sourceId INTEGER NOT NULL,
+        subject TEXT NOT NULL,
+        courseCode TEXT NOT NULL,
+        year INTEGER NOT NULL,
+        term INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        descReplacementCourse TEXT,
+        descRequisites TEXT,
+        descLastUpdated TEXT,
+        credits REAL NOT NULL,
+        hoursLecture REAL NOT NULL,
+        hoursSeminar REAL NOT NULL,
+        hoursLab REAL NOT NULL,
+        UNIQUE(subject, courseCode, year, term),
+        FOREIGN KEY (sourceId) REFERENCES SourceFetched(id)
+    )
+`);     UNIQUE(subject, courseCode, year, term)
+    )
+`);
+
+// Create indexes for CourseSummary
+db.run(`CREATE INDEX IF NOT EXISTS idx_coursesummary_subject ON CourseSummary(subject)`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_coursesummary_year_term ON CourseSummary(year, term)`);
+// Create Section table for parsed semester search data
+db.run(`
+    CREATE TABLE IF NOT EXISTS Section (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sourceId INTEGER NOT NULL,
+        subject TEXT NOT NULL,
+        courseCode TEXT NOT NULL,
+        year INTEGER NOT NULL,
+        term INTEGER NOT NULL,
+        crn INTEGER NOT NULL,
+        section TEXT,
+        credits REAL NOT NULL,
+        abbreviatedTitle TEXT,
+        rp TEXT,
+        seats TEXT,
+        waitlist TEXT,
+        addFees REAL,
+        rptLimit INTEGER,
+        notes TEXT,
+        UNIQUE(subject, courseCode, year, term, crn),
+        FOREIGN KEY (sourceId) REFERENCES SourceFetched(id)
+    )
+`);     UNIQUE(subject, courseCode, year, term, crn)
+    )
+`);
+
+// Create indexes for Section
+// Create ScheduleEntry table for section schedules
+db.run(`
+    CREATE TABLE IF NOT EXISTS ScheduleEntry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sourceId INTEGER NOT NULL,
+        subject TEXT NOT NULL,
+        courseCode TEXT NOT NULL,
+        year INTEGER NOT NULL,
+        term INTEGER NOT NULL,
+        crn INTEGER NOT NULL,
+        scheduleIndex INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        days TEXT NOT NULL,
+        time TEXT NOT NULL,
+        start TEXT,
+        end TEXT,
+        room TEXT NOT NULL,
+        instructor TEXT NOT NULL,
+        UNIQUE(subject, courseCode, year, term, crn, scheduleIndex),
+        FOREIGN KEY (sourceId) REFERENCES SourceFetched(id)
+    )
+`);     room TEXT NOT NULL,
+        instructor TEXT NOT NULL,
+        UNIQUE(subject, courseCode, year, term, crn, scheduleIndex)
+    )
+`);
+
+// Create indexes for ScheduleEntry
+db.run(`CREATE INDEX IF NOT EXISTS idx_schedule_crn ON ScheduleEntry(crn)`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_schedule_year_term ON ScheduleEntry(year, term)`);
+
 // Get content from a contentLink (supports file:// links)
 async function getContent(contentLink: string): Promise<string> {
     if (contentLink.startsWith("file://")) {
@@ -23,22 +157,22 @@ async function getContent(contentLink: string): Promise<string> {
 }
 
 // Main parser that routes to the appropriate parser
-async function parseContent(sourceType: Source['sourceType'], content: string, sourceIdentifier: string): Promise<void> {
+async function parseContent(sourceType: Source['sourceType'], content: string, sourceIdentifier: string, sourceId: number): Promise<void> {
     switch (sourceType) {
         case 'SemesterSearch':
-            await parseSemesterSearch(content, sourceIdentifier, db);
+            await parseSemesterSearch(content, sourceIdentifier, sourceId, db);
             break;
         case 'SemesterCatalogue':
-            await parseSemesterCatalogue(content, sourceIdentifier, db);
+            await parseSemesterCatalogue(content, sourceIdentifier, sourceId, db);
             break;
         case 'SemesterAttributes':
-            await parseSemesterAttributes(content, sourceIdentifier, db);
+            await parseSemesterAttributes(content, sourceIdentifier, sourceId, db);
             break;
         case 'TransferCredits':
-            await parseTransferCredits(content, sourceIdentifier, db);
+            await parseTransferCredits(content, sourceIdentifier, sourceId, db);
             break;
         case 'TransferCreditSubjects':
-            await parseTransferCreditSubjects(content, sourceIdentifier, db);
+            await parseTransferCreditSubjects(content, sourceIdentifier, sourceId, db);
             break;
         default:
             throw new Error(`Unknown source type: ${sourceType}`);
@@ -54,7 +188,7 @@ async function processSourceFetched(record: SourceFetched & { sourceType: Source
         const content = await getContent(record.contentLink);
         
         // Parse the content and write to database
-        await parseContent(record.sourceType, content, record.sourceIdentifier);
+        await parseContent(record.sourceType, content, record.sourceIdentifier, record.sourceId);
         
         // Mark as parsed
         db.run(`UPDATE SourceFetched SET parsed = 1 WHERE id = ?`, [record.id]);
