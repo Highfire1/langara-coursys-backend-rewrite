@@ -61,6 +61,7 @@ db.run(`
 
 // Create indexes for CourseAttribute
 db.run(`CREATE INDEX IF NOT EXISTS idx_courseattr_subject ON CourseAttribute(subject)`);
+
 // Create CourseSummary table for parsed catalogue data
 db.run(`
     CREATE TABLE IF NOT EXISTS CourseSummary (
@@ -82,13 +83,12 @@ db.run(`
         UNIQUE(subject, courseCode, year, term),
         FOREIGN KEY (sourceId) REFERENCES SourceFetched(id)
     )
-`);     UNIQUE(subject, courseCode, year, term)
-    )
 `);
 
 // Create indexes for CourseSummary
 db.run(`CREATE INDEX IF NOT EXISTS idx_coursesummary_subject ON CourseSummary(subject)`);
 db.run(`CREATE INDEX IF NOT EXISTS idx_coursesummary_year_term ON CourseSummary(year, term)`);
+
 // Create Section table for parsed semester search data
 db.run(`
     CREATE TABLE IF NOT EXISTS Section (
@@ -111,11 +111,13 @@ db.run(`
         UNIQUE(subject, courseCode, year, term, crn),
         FOREIGN KEY (sourceId) REFERENCES SourceFetched(id)
     )
-`);     UNIQUE(subject, courseCode, year, term, crn)
-    )
 `);
 
 // Create indexes for Section
+db.run(`CREATE INDEX IF NOT EXISTS idx_section_subject ON Section(subject)`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_section_year_term ON Section(year, term)`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_section_crn ON Section(crn)`);
+
 // Create ScheduleEntry table for section schedules
 db.run(`
     CREATE TABLE IF NOT EXISTS ScheduleEntry (
@@ -136,10 +138,6 @@ db.run(`
         instructor TEXT NOT NULL,
         UNIQUE(subject, courseCode, year, term, crn, scheduleIndex),
         FOREIGN KEY (sourceId) REFERENCES SourceFetched(id)
-    )
-`);     room TEXT NOT NULL,
-        instructor TEXT NOT NULL,
-        UNIQUE(subject, courseCode, year, term, crn, scheduleIndex)
     )
 `);
 

@@ -89,7 +89,6 @@ export interface CourseSummary {
     
     subject: string;                    // Subject code e.g. "CPSC"
     courseCode: string;                 // Course number e.g. "1150"
-    courseCode: string;                 // Course number e.g. "1150"
     year: number;                       // Year (e.g. 2024)
     term: number;                       // Term (10=Spring, 20=Summer, 30=Fall)
     
@@ -113,7 +112,6 @@ export interface Section {
     
     subject: string;                    // Subject code e.g. "CPSC"
     courseCode: string;                 // Course number e.g. "1150"
-    courseCode: string;                 // Course number e.g. "1150"
     year: number;                       // Year (e.g. 2024)
     term: number;                       // Term (10=Spring, 20=Summer, 30=Fall)
     
@@ -135,8 +133,6 @@ export interface ScheduleEntry {
     id: number;                         // Autoincrementing primary key
     sourceId: number;                   // ID of the SourceFetched record this was parsed from
     
-    subject: string;                    // Subject code e.g. "CPSC"
-    courseCode: string;                 // Course number e.g. "1150"
     subject: string;                    // Subject code e.g. "CPSC"
     courseCode: string;                 // Course number e.g. "1150"
     year: number;                       // Year (e.g. 2024)

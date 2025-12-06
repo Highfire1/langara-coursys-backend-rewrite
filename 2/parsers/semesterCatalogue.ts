@@ -23,7 +23,7 @@ interface ParsedCourse {
 
 // Parse SemesterCatalogue HTML content
 // Contains course catalogue information for a specific term
-export async function parseSemesterCatalogue(content: string, sourceIdentifier: string, db: Database): Promise<void> {
+export async function parseSemesterCatalogue(content: string, sourceIdentifier: string, sourceId: number, db: Database): Promise<void> {
     const { year, term } = parseYearTerm(sourceIdentifier);
     
     const courses: ParsedCourse[] = [];
