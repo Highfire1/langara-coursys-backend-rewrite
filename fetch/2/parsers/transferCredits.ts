@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { Transfer } from "../../types.ts";
+import { Transfer } from "../../../types.ts";
 
 interface RawTransfer {
     id: number;

@@ -89,4 +89,4 @@ Bun.serve({
     }
 });
 
-console.log(`Service 4 frontend running on http://localhost:${PORT} (API: ${API_BASE})`);
+console.log(`Frontend running on http://localhost:${PORT} (API: ${API_BASE})`);

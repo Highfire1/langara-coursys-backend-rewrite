@@ -1,7 +1,7 @@
 // - Service 3 parses each document in the queue and writes that data to the database
 
 import { Database } from "bun:sqlite";
-import { Source, SourceFetched } from "../types.ts";
+import { Source, SourceFetched } from "../../types.ts";
 import { readFile } from "fs/promises";
 import {
     parseSemesterSearch,
@@ -11,7 +11,7 @@ import {
     parseTransferCreditSubjects
 } from "./parsers/index.ts";
 
-const db = new Database("database.sqlite", { create: true });
+const db = new Database("./data/database.sqlite");
 
 // Create Transfer table for parsed transfer credit data
 db.run(`

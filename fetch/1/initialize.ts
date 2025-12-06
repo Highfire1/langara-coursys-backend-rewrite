@@ -1,9 +1,7 @@
 import { Database } from "bun:sqlite";
-import { Source } from "../types.ts";
+import { Source } from "../../types.ts";
 
-const db = new Database("database.sqlite", { create: true });
-
-
+const db = new Database("./data/database.sqlite");
 
 
 interface SourceInfo {

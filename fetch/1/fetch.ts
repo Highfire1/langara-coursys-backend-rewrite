@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { Source } from "../types.ts";
+import { Source } from "../../types.ts";
 import { createHash } from "crypto";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
@@ -12,7 +12,7 @@ import {
     fetchTransferCreditSubjects
 } from "./fetchers/index.ts";
 
-const db = new Database("database.sqlite", { create: true });
+const db = new Database("./data/database.sqlite");
 
 // Create SourceFetched table
 db.run(`
@@ -29,7 +29,7 @@ db.run(`
 `);
 
 // Directory to store fetched content
-const CONTENT_DIR = "./fetched_content";
+const CONTENT_DIR = join(__dirname, "../../data/downloads");
 
 // Ensure content directory exists
 await mkdir(CONTENT_DIR, { recursive: true });

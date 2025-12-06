@@ -11,3 +11,6 @@ Architecture:
 - Service 2 fetches and stores resources enumerated by service 1, it then adds them to a queue to be parsed
 - Service 3 parses each document in the queue and writes that data to the database
 - Service 4 serves data from the database.
+
+
+`bun run serve/index.ts` to make the database accessible to the web.
