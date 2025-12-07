@@ -1,36 +1,79 @@
-import { spawn } from "bun";
+import { Database } from "bun:sqlite";
+import { handleV3 as handlePublic } from "./3/publicApi.ts";
+import { handlePrivate } from "./3/privateApi.ts";
+import { handleFrontend } from "./4/index.ts";
 
-console.log("Starting Service 3 (API) and Service 4 (Frontend)...\n");
+const db = new Database("./data/database.sqlite");
+const PORT = 3000;
 
-const service3 = spawn({
-    cmd: ["bun", "run", "3/index.ts"],
-    cwd: import.meta.dir,
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: "inherit",
+Bun.serve({
+    port: PORT,
+    async fetch(req) {
+        const url = new URL(req.url);
+        const pathname = url.pathname;
+
+        // Public API routes - /api/v3/**
+        if (pathname.startsWith('/api/v3/')) {
+            const publicResp = handlePublic(url, db);
+            if (publicResp) return publicResp;
+
+            return new Response(JSON.stringify({ error: 'Not Found' }), {
+                status: 404,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }
+
+        // Private API routes - /privapi/**
+        if (pathname.startsWith('/privapi/')) {
+            const privateResp = handlePrivate(url, db);
+            if (privateResp) return privateResp;
+
+            return new Response(JSON.stringify({ error: 'Not Found' }), {
+                status: 404,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }
+
+        // Scalar API Reference UI
+        if (pathname === '/api') {
+            return new Response(`<!doctype html>
+<html>
+  <head>
+    <title>Scalar API Reference</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background: #0d1117;
+        color: #c9d1d9;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      #app {
+        min-height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+    <script>
+      Scalar.createApiReference('#app', {
+        url: '/api/v3/openapi.json',
+        theme: 'dark',
+        layout: 'modern',
+      })
+    </script>
+  </body>
+</html>`, {
+                headers: { 'Content-Type': 'text/html' }
+            });
+        }
+
+        // Frontend routes - everything else
+        return await handleFrontend(req, db);
+    },
 });
 
-const service4 = spawn({
-    cmd: ["bun", "run", "4/index.ts"],
-    cwd: import.meta.dir,
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: "inherit",
-});
-
-// Handle cleanup
-process.on("SIGINT", () => {
-    console.log("\nShutting down services...");
-    service3.kill();
-    service4.kill();
-    process.exit(0);
-});
-
-process.on("SIGTERM", () => {
-    service3.kill();
-    service4.kill();
-    process.exit(0);
-});
-
-// Wait for both processes
-await Promise.all([service3.exited, service4.exited]);
+console.log(`Server running on http://localhost:${PORT}`);

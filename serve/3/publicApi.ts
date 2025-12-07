@@ -17,7 +17,7 @@ function buildOpenAPISpec() {
             version: "1.0.0",
             description: "Public read-only API for course and transfer data",
         },
-        servers: [{ url: "/v3" }],
+        servers: [{ url: "/api/v3" }],
         paths: {
             "/health": {
                 get: {
@@ -83,9 +83,9 @@ function buildOpenAPISpec() {
 export function handleV3(url: URL, db: Database): Response | null {
     const pathname = url.pathname;
 
-    if (!pathname.startsWith("/v3/")) return null;
+    if (!pathname.startsWith("/api/v3/")) return null;
 
-    if (pathname === "/v3/health") {
+    if (pathname === "/api/v3/health") {
         return new Response(
             JSON.stringify({
                 status: "healthy",
@@ -97,11 +97,11 @@ export function handleV3(url: URL, db: Database): Response | null {
         );
     }
 
-    if (pathname === "/v3/subjects") {
+    if (pathname === "/api/v3/subjects") {
         return new Response(JSON.stringify(getDistinctSubjects(db)), { headers });
     }
 
-    if (pathname === "/v3/openapi.json") {
+    if (pathname === "/api/v3/openapi.json") {
         const spec = buildOpenAPISpec();
         return new Response(JSON.stringify(spec, null, 2), { headers });
     }

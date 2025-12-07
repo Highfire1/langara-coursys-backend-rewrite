@@ -132,6 +132,10 @@ export function renderHome(stats: HomeStats): string {
                 <h3>🔌 Records</h3>
                 <p>Browse fetched records with pagination.</p>
             </a>
+            <a href="/api" class="link-card">
+                <h3>🔌 Public API</h3>
+                <p>Interactive API reference with OpenAPI specification.</p>
+            </a>
         </div>
 
         <footer>

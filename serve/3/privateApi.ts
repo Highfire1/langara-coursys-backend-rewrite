@@ -173,7 +173,7 @@ function buildOpenAPISpec() {
             version: "1.0.0",
             description: "Internal API for stats, sources, and fetched records",
         },
-        servers: [{ url: "/api" }],
+        servers: [{ url: "/privapi" }],
         paths: {
             "/health": {
                 get: {
@@ -352,9 +352,9 @@ export function handlePrivate(url: URL, db: Database): Response | null {
     const pathname = url.pathname;
     const headers = { 'Content-Type': 'application/json' } as const;
 
-    if (!pathname.startsWith('/api/')) return null;
+    if (!pathname.startsWith('/privapi/')) return null;
 
-    if (pathname === '/api/health') {
+    if (pathname === '/privapi/health') {
         return new Response(JSON.stringify({
             status: 'healthy',
             timestamp: new Date().toISOString(),
@@ -363,15 +363,15 @@ export function handlePrivate(url: URL, db: Database): Response | null {
         }), { headers });
     }
 
-    if (pathname === '/api/stats') {
+    if (pathname === '/privapi/stats') {
         return new Response(JSON.stringify(getStats(db)), { headers });
     }
 
-    if (pathname === '/api/sources') {
+    if (pathname === '/privapi/sources') {
         return new Response(JSON.stringify(getAllSources(db)), { headers });
     }
 
-    if (pathname.match(/^\/api\/sources\/(\d+)$/)) {
+    if (pathname.match(/^\/privapi\/sources\/(\d+)$/)) {
         const sourceId = parseInt(pathname.split('/')[3]);
         const data = getSourceWithFetches(db, sourceId);
         if (!data) {
@@ -380,13 +380,13 @@ export function handlePrivate(url: URL, db: Database): Response | null {
         return new Response(JSON.stringify(data), { headers });
     }
 
-    if (pathname === '/api/recent-fetches') {
+    if (pathname === '/privapi/recent-fetches') {
         const limitParam = parseInt(url.searchParams.get('limit') || '20', 10);
         const limit = isNaN(limitParam) || limitParam < 1 ? 20 : limitParam;
         return new Response(JSON.stringify(getRecentFetches(db, limit)), { headers });
     }
 
-    if (pathname === '/api/records') {
+    if (pathname === '/privapi/records') {
         const pageParam = parseInt(url.searchParams.get('page') || '1', 10);
         const pageSizeParam = parseInt(url.searchParams.get('pageSize') || '25', 10);
         const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
@@ -403,7 +403,7 @@ export function handlePrivate(url: URL, db: Database): Response | null {
         return new Response(JSON.stringify(payload), { headers });
     }
 
-    if (pathname.match(/^\/api\/records\/(\d+)$/)) {
+    if (pathname.match(/^\/privapi\/records\/(\d+)$/)) {
         const recordId = parseInt(pathname.split('/')[3]);
         const record = db.query("SELECT * FROM SourceFetched WHERE id = ?").get(recordId) as any;
         if (!record) {
@@ -423,7 +423,7 @@ export function handlePrivate(url: URL, db: Database): Response | null {
 
         return new Response(JSON.stringify({ record, source, content }), { headers });
     }
-    if (pathname === '/api/openapi.json') {
+    if (pathname === '/privapi/openapi.json') {
         const spec = buildOpenAPISpec();
         return new Response(JSON.stringify(spec, null, 2), { headers });
     }
