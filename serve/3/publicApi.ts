@@ -64,7 +64,7 @@ export function createPublicApi(db: Database) {
             },
             // references: fromTypes({ path: './types.ts' }),
         }))
-        .get("/health", () => ({
+        .get("api/health", () => ({
             status: "healthy",
             timestamp: new Date().toISOString(),
             database: "connected",
