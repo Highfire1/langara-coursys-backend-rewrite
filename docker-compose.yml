@@ -1,0 +1,13 @@
+services:
+  langara-coursys-rewrite:
+    container_name: langara-coursys-rewrite
+    ports:
+      - '3000:3000'
+    image: "ghcr.io/highfire1/langara-coursys-backend-rewrite:latest"
+    networks:
+      - backend
+    volumes:
+      - ./data:/usr/src/app/data
+
+networks:
+  backend:

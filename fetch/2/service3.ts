@@ -191,7 +191,7 @@ async function processSourceFetched(record: SourceFetched & { sourceType: Source
         // Mark as parsed
         db.run(`UPDATE SourceFetched SET parsed = 1 WHERE id = ?`, [record.id]);
         
-        console.log(`  Parsed successfully`);
+        // console.log(`  Parsed successfully`);
     } catch (error) {
         console.error(`  Error parsing record ${record.id}:`, error);
     }

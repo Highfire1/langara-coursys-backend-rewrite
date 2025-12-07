@@ -1,12 +1,11 @@
 FROM oven/bun:1 AS base
 WORKDIR /usr/src/app
 
-# FROM base AS install
-# COPY package.json bun.lockb ./
-# RUN bun install --frozen-lockfile
+# Install dependencies
+COPY package.json ./
+RUN bun install --frozen-lockfile
 
-# FROM base AS release
-# COPY --from=install /usr/src/app/node_modules node_modules
+# Copy source
 COPY . .
 
 USER bun

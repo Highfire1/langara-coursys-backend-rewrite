@@ -1,6 +1,10 @@
+import { Elysia, t } from "elysia";
+import { openapi, fromTypes } from "@elysiajs/openapi";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "fs";
 import { Source } from "../../types.ts";
+
+const jsonHeaders = { 'Content-Type': 'application/json' } as const;
 
 function formatRelativeFuture(date: Date): string {
     const now = new Date();
@@ -347,86 +351,90 @@ function buildOpenAPISpec() {
     };
 }
 
-// API routes
-export function handlePrivate(url: URL, db: Database): Response | null {
-    const pathname = url.pathname;
-    const headers = { 'Content-Type': 'application/json' } as const;
-
-    if (!pathname.startsWith('/privapi/')) return null;
-
-    if (pathname === '/privapi/health') {
-        return new Response(JSON.stringify({
+// API routes via Elysia
+export function createPrivateApi(db: Database) {
+    return new Elysia({ prefix: "/privapi" })
+        .use(openapi({
+            path: "/openapi.json",
+            documentation: {
+                info: {
+                    title: "Langara Course Data Private API",
+                    version: "1.0.0",
+                    description: "Internal API for stats, sources, and fetched records",
+                },
+            },
+            references: fromTypes(),
+        }))
+        .get("/health", () => ({
             status: 'healthy',
             timestamp: new Date().toISOString(),
             database: 'connected',
             version: '1.0.0'
-        }), { headers });
-    }
-
-    if (pathname === '/privapi/stats') {
-        return new Response(JSON.stringify(getStats(db)), { headers });
-    }
-
-    if (pathname === '/privapi/sources') {
-        return new Response(JSON.stringify(getAllSources(db)), { headers });
-    }
-
-    if (pathname.match(/^\/privapi\/sources\/(\d+)$/)) {
-        const sourceId = parseInt(pathname.split('/')[3]);
-        const data = getSourceWithFetches(db, sourceId);
-        if (!data) {
-            return new Response(JSON.stringify({ error: 'Source not found' }), { status: 404, headers });
-        }
-        return new Response(JSON.stringify(data), { headers });
-    }
-
-    if (pathname === '/privapi/recent-fetches') {
-        const limitParam = parseInt(url.searchParams.get('limit') || '20', 10);
-        const limit = isNaN(limitParam) || limitParam < 1 ? 20 : limitParam;
-        return new Response(JSON.stringify(getRecentFetches(db, limit)), { headers });
-    }
-
-    if (pathname === '/privapi/records') {
-        const pageParam = parseInt(url.searchParams.get('page') || '1', 10);
-        const pageSizeParam = parseInt(url.searchParams.get('pageSize') || '25', 10);
-        const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
-        const pageSize = isNaN(pageSizeParam) || pageSizeParam < 1 ? 25 : Math.min(pageSizeParam, 200);
-
-        const parsedRow = db.query("SELECT COUNT(*) as count FROM SourceFetched WHERE parsed = 1").get() as any;
-        const unparsedRow = db.query("SELECT COUNT(*) as count FROM SourceFetched WHERE parsed = 0").get() as any;
-        const paged = getFetchedPage(db, page, pageSize);
-        const payload = {
-            ...paged,
-            parsedTotal: parsedRow?.count || 0,
-            unparsedTotal: unparsedRow?.count || 0,
-        };
-        return new Response(JSON.stringify(payload), { headers });
-    }
-
-    if (pathname.match(/^\/privapi\/records\/(\d+)$/)) {
-        const recordId = parseInt(pathname.split('/')[3]);
-        const record = db.query("SELECT * FROM SourceFetched WHERE id = ?").get(recordId) as any;
-        if (!record) {
-            return new Response(JSON.stringify({ error: 'Record not found' }), { status: 404, headers });
-        }
-
-        const source = db.query("SELECT * FROM Source WHERE id = ?").get(record.sourceId) as any;
-        let content: string | null = null;
-        if (record.contentLink?.startsWith("file://")) {
-            const filepath = record.contentLink.slice(7);
-            try {
-                content = readFileSync(filepath, 'utf-8');
-            } catch {
-                content = null;
+        }), {
+            response: t.Object({
+                status: t.String(),
+                timestamp: t.String(),
+                database: t.String(),
+                version: t.String(),
+            })
+        })
+        .get("/stats", () => getStats(db), {
+            response: t.Object({
+                totalSources: t.Number(),
+                activeSources: t.Number(),
+                dueSources: t.Number(),
+                totalFetched: t.Number(),
+                totalParsed: t.Number(),
+            })
+        })
+        .get("/sources", () => getAllSources(db))
+        .get("/sources/:id", ({ params }) => {
+            const sourceId = Number(params.id);
+            const data = getSourceWithFetches(db, sourceId);
+            if (!data) {
+                return new Response(JSON.stringify({ error: 'Source not found' }), { status: 404, headers: jsonHeaders });
             }
-        }
+            return data;
+        })
+        .get("/recent-fetches", ({ query }) => {
+            const limitParam = parseInt((query as any)?.limit ?? '20', 10);
+            const limit = isNaN(limitParam) || limitParam < 1 ? 20 : limitParam;
+            return getRecentFetches(db, limit);
+        })
+        .get("/records", ({ query }) => {
+            const pageParam = parseInt((query as any)?.page ?? '1', 10);
+            const pageSizeParam = parseInt((query as any)?.pageSize ?? '25', 10);
+            const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
+            const pageSize = isNaN(pageSizeParam) || pageSizeParam < 1 ? 25 : Math.min(pageSizeParam, 200);
 
-        return new Response(JSON.stringify({ record, source, content }), { headers });
-    }
-    if (pathname === '/privapi/openapi.json') {
-        const spec = buildOpenAPISpec();
-        return new Response(JSON.stringify(spec, null, 2), { headers });
-    }
+            const parsedRow = db.query("SELECT COUNT(*) as count FROM SourceFetched WHERE parsed = 1").get() as any;
+            const unparsedRow = db.query("SELECT COUNT(*) as count FROM SourceFetched WHERE parsed = 0").get() as any;
+            const paged = getFetchedPage(db, page, pageSize);
+            return {
+                ...paged,
+                parsedTotal: parsedRow?.count || 0,
+                unparsedTotal: unparsedRow?.count || 0,
+            };
+        })
+        .get("/records/:id", ({ params }) => {
+            const recordId = Number(params.id);
+            const record = db.query("SELECT * FROM SourceFetched WHERE id = ?").get(recordId) as any;
+            if (!record) {
+                return new Response(JSON.stringify({ error: 'Record not found' }), { status: 404, headers: jsonHeaders });
+            }
 
-    return new Response(JSON.stringify({ error: 'Not Found' }), { status: 404, headers });
+            const source = db.query("SELECT * FROM Source WHERE id = ?").get(record.sourceId) as any;
+            let content: string | null = null;
+            if (record.contentLink?.startsWith("file://")) {
+                const filepath = record.contentLink.slice(7);
+                try {
+                    content = readFileSync(filepath, 'utf-8');
+                } catch {
+                    content = null;
+                }
+            }
+
+            return { record, source, content };
+        })
+        .get("/openapi.json", () => buildOpenAPISpec());
 }

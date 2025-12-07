@@ -1,0 +1,12 @@
+{
+  "name": "langara-coursys-backend-rewrite",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun run index.ts"
+  },
+  "dependencies": {
+    "elysia": "^1.1.5",
+    "@elysiajs/openapi": "^1.4.11"
+  }
+}

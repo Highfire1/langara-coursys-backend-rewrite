@@ -1,78 +1,45 @@
 import { Database } from "bun:sqlite";
-import { handleV3 as handlePublic } from "./3/publicApi.ts";
-import { handlePrivate } from "./3/privateApi.ts";
+import { createPublicApi } from "./3/publicApi.ts";
+import { createPrivateApi } from "./3/privateApi.ts";
 import { handleFrontend } from "./4/index.ts";
+import path from "path";
 
 const db = new Database("./data/database.sqlite");
 const PORT = 3000;
+
+// Initialize Elysia apps for APIs
+const publicApi = createPublicApi(db);
+const privateApi = createPrivateApi(db);
 
 Bun.serve({
     port: PORT,
     async fetch(req) {
         const url = new URL(req.url);
         const pathname = url.pathname;
+        const normalizedPath = pathname !== '/' && pathname.endsWith('/')
+            ? pathname.slice(0, -1)
+            : pathname;
 
-        // Public API routes - /api/v3/**
-        if (pathname.startsWith('/api/v3/')) {
-            const publicResp = handlePublic(url, db);
-            if (publicResp) return publicResp;
-
-            return new Response(JSON.stringify({ error: 'Not Found' }), {
-                status: 404,
-                headers: { 'Content-Type': 'application/json' },
-            });
+        const withPath = (newPath: string) => {
+            const u = new URL(req.url);
+            u.pathname = newPath;
+            return new Request(u, req);
+        };
+        
+        if (normalizedPath.startsWith('/api')) {
+            // const strippedPath = normalizedPath.slice(4); // Remove '/api'
+            const publicResp = await publicApi.handle(withPath(normalizedPath));
+            if (publicResp.status !== 404) return publicResp;
         }
 
-        // Private API routes - /privapi/**
-        if (pathname.startsWith('/privapi/')) {
-            const privateResp = handlePrivate(url, db);
-            if (privateResp) return privateResp;
-
-            return new Response(JSON.stringify({ error: 'Not Found' }), {
-                status: 404,
-                headers: { 'Content-Type': 'application/json' },
-            });
-        }
-
-        // Scalar API Reference UI
-        if (pathname === '/api') {
-            return new Response(`<!doctype html>
-<html>
-  <head>
-    <title>Scalar API Reference</title>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      body {
-        margin: 0;
-        padding: 0;
-        background: #0d1117;
-        color: #c9d1d9;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      }
-      #app {
-        min-height: 100vh;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
-    <script>
-      Scalar.createApiReference('#app', {
-        url: '/api/v3/openapi.json',
-        theme: 'dark',
-        layout: 'modern',
-      })
-    </script>
-  </body>
-</html>`, {
-                headers: { 'Content-Type': 'text/html' }
-            });
+        // Private API routes - /privapi/** (normalized)
+        if (normalizedPath.startsWith('/privapi/')) {
+            const privateResp = await privateApi.handle(withPath(normalizedPath));
+            if (privateResp.status !== 404) return privateResp;
         }
 
         // Frontend routes - everything else
-        return await handleFrontend(req, db);
+        return await handleFrontend(req, db, privateApi);
     },
 });
 
