@@ -13,4 +13,4 @@ Architecture:
 - Service 4 serves data from the database.
 
 
-`bun run serve/index.ts` to make the database accessible to the web.
+`bun run index.ts` to make the database accessible to the web.
