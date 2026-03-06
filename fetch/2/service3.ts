@@ -8,7 +8,7 @@ import {
     parseSemesterCatalogue,
     parseSemesterAttributes,
     parseTransferCredits,
-    parseTransferCreditSubjects
+    parseLangaraCoursePage,
 } from "./parsers/index.ts";
 
 const db = new Database("./data/database.sqlite");
@@ -145,7 +145,88 @@ db.run(`
 db.run(`CREATE INDEX IF NOT EXISTS idx_schedule_crn ON ScheduleEntry(crn)`);
 db.run(`CREATE INDEX IF NOT EXISTS idx_schedule_year_term ON ScheduleEntry(year, term)`);
 
-// Get content from a contentLink (supports file:// links)
+// Create LangaraCourseDetail table for data scraped from langara.ca course pages
+db.run(`
+    CREATE TABLE IF NOT EXISTS LangaraCourseDetail (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sourceId INTEGER NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        subject TEXT NOT NULL,
+        courseCode TEXT NOT NULL,
+        title TEXT,
+        studyType TEXT,
+        lectureHours REAL,
+        seminarHours REAL,
+        labHours REAL,
+        credits REAL,
+        description TEXT,
+        descDegreeRequirements TEXT,
+        descPrerequisites TEXT,
+        descCorequisites TEXT,
+        courseOutlineUrl TEXT,
+        FOREIGN KEY (sourceId) REFERENCES SourceFetched(id)
+    )
+`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_langara_course_subject ON LangaraCourseDetail(subject)`);
+
+// Unified Course view — merges all four data sources.
+// Each source independently contributes the most recent data it has.
+// LangaraCourseDetail (langara.ca) takes precedence over CourseSummary (catalogue)
+// for overlapping fields. CourseAttribute provides the latest degree-requirement flags.
+db.run(`
+    CREATE VIEW IF NOT EXISTS Course AS
+    WITH
+    all_courses(subject, courseCode) AS (
+        SELECT subject, courseCode FROM CourseSummary
+        UNION SELECT subject, courseCode FROM Section
+        UNION SELECT subject, courseNumber FROM Transfer
+        UNION SELECT subject, courseCode FROM LangaraCourseDetail
+    ),
+    latest_catalogue AS (
+        SELECT cs.*
+        FROM CourseSummary cs
+        INNER JOIN (
+            SELECT subject, courseCode, MAX(year * 100 + term) AS maxYT
+            FROM CourseSummary GROUP BY subject, courseCode
+        ) m ON cs.subject = m.subject AND cs.courseCode = m.courseCode
+           AND cs.year * 100 + cs.term = m.maxYT
+    ),
+    latest_attribute AS (
+        SELECT ca.*
+        FROM CourseAttribute ca
+        INNER JOIN (
+            SELECT subject, courseCode, MAX(year * 100 + term) AS maxYT
+            FROM CourseAttribute GROUP BY subject, courseCode
+        ) m ON ca.subject = m.subject AND ca.courseCode = m.courseCode
+           AND ca.year * 100 + ca.term = m.maxYT
+    )
+    SELECT
+        c.subject,
+        c.courseCode,
+        COALESCE(lcd.title,        lcat.title)          AS title,
+        CASE WHEN lcd.slug IS NOT NULL THEN 1 ELSE 0 END AS onLangaraWebsite,
+        lcd.studyType,
+        COALESCE(lcd.credits,      lcat.credits)        AS credits,
+        COALESCE(lcd.lectureHours, lcat.hoursLecture)   AS lectureHours,
+        COALESCE(lcd.seminarHours, lcat.hoursSeminar)   AS seminarHours,
+        COALESCE(lcd.labHours,     lcat.hoursLab)       AS labHours,
+        COALESCE(lcd.description,  lcat.description)    AS description,
+        lcd.descPrerequisites,
+        lcd.descCorequisites,
+        lcd.descDegreeRequirements,
+        lcat.descRequisites                             AS descRequisitesCatalogue,
+        lcat.descReplacementCourse,
+        lcd.courseOutlineUrl,
+        la.attr2AR, la.attr2SC, la.attrHUM, la.attrLSC,
+        la.attrSCI, la.attrSOC, la.attrUT
+    FROM all_courses c
+    LEFT JOIN LangaraCourseDetail lcd
+           ON lcd.subject = c.subject AND lcd.courseCode = c.courseCode
+    LEFT JOIN latest_catalogue lcat
+           ON lcat.subject = c.subject AND lcat.courseCode = c.courseCode
+    LEFT JOIN latest_attribute la
+           ON la.subject = c.subject AND la.courseCode = c.courseCode
+`);
 async function getContent(contentLink: string): Promise<string> {
     if (contentLink.startsWith("file://")) {
         const filepath = contentLink.slice(7); // Remove "file://" prefix
@@ -169,9 +250,11 @@ async function parseContent(sourceType: Source['sourceType'], content: string, s
         case 'TransferCredits':
             await parseTransferCredits(content, sourceIdentifier, sourceId, db);
             break;
-        case 'TransferCreditSubjects':
-            await parseTransferCreditSubjects(content, sourceIdentifier, sourceId, db);
+        case 'LangaraCoursePage':
+            await parseLangaraCoursePage(content, sourceIdentifier, sourceId, db);
             break;
+        // Meta tasks (DiscoverSemesters, DiscoverTransferSubjects, DiscoverLangaraCourses) are
+        // marked parsed=1 at fetch time and never appear in the unparsed queue.
         default:
             throw new Error(`Unknown source type: ${sourceType}`);
     }

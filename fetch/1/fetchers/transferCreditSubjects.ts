@@ -1,12 +1,10 @@
-import { FetchResult } from "./types.ts";
-import { Database } from "bun:sqlite";
+// This fetcher has been superseded by the DiscoverTransferSubjects meta task.
+// See: fetch/1/meta/discoverTransferSubjects.ts
+//
+// The old TransferCreditSubjects source type has been replaced by DiscoverTransferSubjects,
+// which is responsible for discovering new TransferCredits sources from the BC Transfer Guide.
+export {};
 
-const WS_BASE_URL = "https://api.bctransferguide.ca";
-
-const headers = {
-    "Accept": "application/json",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0"
-};
 
 export interface TransferSubject {
     id: number;

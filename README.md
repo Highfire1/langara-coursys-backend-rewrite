@@ -12,5 +12,7 @@ Architecture:
 - Service 3 parses each document in the queue and writes that data to the database
 - Service 4 serves data from the database.
 
-
+`bun install` to install dependencies
 `bun run index.ts` to make the database accessible to the web.
+- or `bun run fetch.ts` for the backend
+- and `bun run serve.ts` for the api

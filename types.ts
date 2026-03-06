@@ -11,7 +11,11 @@ Architecture:
 
 export interface Source {
     id: number;
-    sourceType: 'SemesterSearch' | 'SemesterCatalogue' | 'SemesterAttributes' | 'TransferCredits' | 'TransferCreditSubjects';
+    // Normal tasks: fetch data for a known resource
+    // Meta tasks: discover new resources and register them as sources
+    sourceType: 'SemesterSearch' | 'SemesterCatalogue' | 'SemesterAttributes' | 'TransferCredits'
+              | 'LangaraCoursePage'
+              | 'DiscoverSemesters' | 'DiscoverTransferSubjects' | 'DiscoverLangaraCourses';
     sourceIdentifier: string;
     fetchFrequency: number; // in hours
 
@@ -149,3 +153,26 @@ export interface ScheduleEntry {
     instructor: string;                 // Instructor name(s)
 }
 
+// Course detail scraped from the Langara website (langara.ca/programs-courses/{slug})
+export interface LangaraCourseDetail {
+    id: number;                         // Autoincrementing primary key
+    sourceId: number;                   // ID of the SourceFetched record this was parsed from
+
+    slug: string;                       // URL slug e.g. "cpsc-1150"
+    subject: string;                    // Subject code e.g. "CPSC"
+    courseCode: string;                 // Course number e.g. "1150"
+
+    title: string;                      // Course title e.g. "Algorithms and Data Structures II"
+    studyType: string;                  // "Regular Studies" or "Continuing Studies"
+    lectureHours: number;
+    seminarHours: number;
+    labHours: number;
+    credits: number;
+
+    description: string;                // Main course description
+    descDegreeRequirements: string | null; // Admission/degree restrictions
+    descPrerequisites: string | null;   // Prerequisite(s): ...
+    descCorequisites: string | null;    // Corequisite(s): ...
+
+    courseOutlineUrl: string | null;    // Link to latest course outline PDF (not always present)
+}

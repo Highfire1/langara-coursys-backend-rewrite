@@ -26,19 +26,455 @@ function getAllSemesters(db: Database) {
     };
 }
 
-function getAllSubjects(db: Database) {
-    const rows = db
-        .query(`SELECT DISTINCT subject FROM Section ORDER BY subject ASC`)
-        .all() as Array<{ subject: string }>;
+function getAllSubjects(db: Database, all: boolean) {
+    // When `all` is false (default), only return subjects that have at least one section.
+    // When `all` is true, also include subjects that only appear in CourseSummary (pre-1999 etc.)
+    const rows = all
+        ? db.query(`
+            SELECT DISTINCT subject FROM (
+                SELECT subject FROM Section
+                UNION SELECT subject FROM CourseSummary
+            ) ORDER BY subject ASC
+          `).all() as Array<{ subject: string }>
+        : db.query(`SELECT DISTINCT subject FROM Section ORDER BY subject ASC`)
+              .all() as Array<{ subject: string }>;
     return {
         count: rows.length,
         subjects: rows.map(r => r.subject),
     };
 }
 
-async function getAllCourses() {
-    const resp = await fetch("https://api.langaracourses.ca/v1/index/courses");
-    return await resp.json();
+function getAllCourses(db: Database) {
+    const rows = db.query(
+        `SELECT subject, courseCode, title, onLangaraWebsite FROM Course ORDER BY subject ASC, courseCode ASC`
+    ).all() as Array<{ subject: string; courseCode: string; title: string | null; onLangaraWebsite: number }>;
+
+    const subjects = new Set(rows.map(r => r.subject));
+    return {
+        subject_count: subjects.size,
+        course_count: rows.length,
+        courses: rows.map(r => ({
+            subject: r.subject,
+            course_code: r.courseCode,
+            title: r.title,
+            on_langara_website: r.onLangaraWebsite === 1,
+        })),
+    };
+}
+
+// ─── Shared helpers ──────────────────────────────────────────────────────────
+
+function shapeCourseRow(row: any) {
+    return {
+        subject:                   row.subject,
+        course_code:               row.courseCode,
+        title:                     row.title,
+        on_langara_website:        row.onLangaraWebsite === 1,
+        study_type:                row.studyType,
+        credits:                   row.credits,
+        lecture_hours:             row.lectureHours,
+        seminar_hours:             row.seminarHours,
+        lab_hours:                 row.labHours,
+        description:               row.description,
+        desc_prerequisites:        row.descPrerequisites,
+        desc_corequisites:         row.descCorequisites,
+        desc_degree_requirements:  row.descDegreeRequirements,
+        desc_requisites_catalogue: row.descRequisitesCatalogue,
+        desc_replacement_course:   row.descReplacementCourse,
+        attributes: {
+            attr_2ar: row.attr2AR === 1,
+            attr_2sc: row.attr2SC === 1,
+            attr_hum: row.attrHUM === 1,
+            attr_lsc: row.attrLSC === 1,
+            attr_sci: row.attrSCI === 1,
+            attr_soc: row.attrSOC === 1,
+            attr_ut:  row.attrUT  === 1,
+        },
+    };
+}
+
+/** Aggregate flat Section + ScheduleEntry rows into nested SectionAPI objects */
+function shapeSections(sections: any[], scheduleRows: any[]) {
+    const scheduleBycrn = new Map<number, any[]>();
+    for (const se of scheduleRows) {
+        if (!scheduleBycrn.has(se.crn)) scheduleBycrn.set(se.crn, []);
+        scheduleBycrn.get(se.crn)!.push({
+            type:       se.type,
+            days:       se.days,
+            time:       se.time,
+            start:      se.start,
+            end:        se.end,
+            room:       se.room,
+            instructor: se.instructor,
+        });
+    }
+    return sections.map(s => ({
+        year:              s.year,
+        term:              s.term,
+        crn:               s.crn,
+        subject:           s.subject,
+        course_code:       s.courseCode,
+        section:           s.section,
+        credits:           s.credits,
+        abbreviated_title: s.abbreviatedTitle,
+        rp:                s.rp,
+        seats:             s.seats,
+        waitlist:          s.waitlist,
+        add_fees:          s.addFees,
+        rpt_limit:         s.rptLimit,
+        notes:             s.notes,
+        schedule:          scheduleBycrn.get(s.crn) ?? [],
+    }));
+}
+
+// ─── Course detail ────────────────────────────────────────────────────────────
+
+function getCourse(db: Database, subject: string, courseCode: string) {
+    const row = db.query(
+        `SELECT * FROM Course WHERE subject = ? AND courseCode = ?`
+    ).get(subject.toUpperCase(), courseCode) as any;
+    if (!row) return null;
+
+    const sectionRows = db.query(`
+        SELECT * FROM Section WHERE subject = ? AND courseCode = ?
+        ORDER BY year DESC, term DESC, crn
+    `).all(subject.toUpperCase(), courseCode) as any[];
+
+    const crns = sectionRows.map(s => s.crn);
+    const scheduleRows = crns.length
+        ? db.query(`SELECT * FROM ScheduleEntry WHERE crn IN (${crns.map(() => '?').join(',')}) ORDER BY crn, scheduleIndex`)
+              .all(...crns) as any[]
+        : [];
+
+    const transfers = db.query(`
+        SELECT * FROM Transfer WHERE subject = ? AND courseNumber = ?
+        ORDER BY effectiveEnd IS NULL DESC, effectiveStart DESC
+    `).all(subject.toUpperCase(), courseCode) as any[];
+
+    const outlines = row.courseOutlineUrl
+        ? [{ url: row.courseOutlineUrl, file_name: `${subject.toUpperCase()} ${courseCode} Course Outline` }]
+        : [];
+
+    return {
+        ...shapeCourseRow(row),
+        course_outline_url: row.courseOutlineUrl,
+        sections:  shapeSections(sectionRows, scheduleRows),
+        transfers: transfers,
+        outlines:  outlines,
+    };
+}
+
+// ─── Semester endpoints ───────────────────────────────────────────────────────
+
+function getSemesterCourses(db: Database, year: number, term: number) {
+    const rows = db.query(`
+        SELECT DISTINCT c.*
+        FROM Course c
+        INNER JOIN Section s ON s.subject = c.subject AND s.courseCode = c.courseCode
+        WHERE s.year = ? AND s.term = ?
+        ORDER BY c.subject, c.courseCode
+    `).all(year, term) as any[];
+    return { year, term, count: rows.length, courses: rows.map(shapeCourseRow) };
+}
+
+function getSemesterSections(db: Database, year: number, term: number) {
+    const sections = db.query(`
+        SELECT * FROM Section WHERE year = ? AND term = ?
+        ORDER BY subject, courseCode, crn
+    `).all(year, term) as any[];
+    const scheduleRows = db.query(`
+        SELECT * FROM ScheduleEntry WHERE year = ? AND term = ?
+        ORDER BY crn, scheduleIndex
+    `).all(year, term) as any[];
+    return { year, term, count: sections.length, sections: shapeSections(sections, scheduleRows) };
+}
+
+function getSection(db: Database, year: number, term: number, crn: number) {
+    const section = db.query(
+        `SELECT * FROM Section WHERE year = ? AND term = ? AND crn = ?`
+    ).get(year, term, crn) as any;
+    if (!section) return null;
+    const scheduleRows = db.query(`
+        SELECT * FROM ScheduleEntry WHERE year = ? AND term = ? AND crn = ?
+        ORDER BY scheduleIndex
+    `).all(year, term, crn) as any[];
+    return shapeSections([section], scheduleRows)[0];
+}
+
+// ─── Search endpoints ─────────────────────────────────────────────────────────
+
+function searchSections(db: Database, params: {
+    query?: string; year?: number; term?: number; online?: boolean;
+}) {
+    const conditions: string[] = [];
+    const args: any[] = [];
+    if (params.year)  { conditions.push(`s.year = ?`);  args.push(params.year); }
+    if (params.term)  { conditions.push(`s.term = ?`);  args.push(params.term); }
+    if (params.query) {
+        const q = `%${params.query}%`;
+        conditions.push(`(
+            s.subject LIKE ? OR s.courseCode LIKE ? OR s.abbreviatedTitle LIKE ?
+            OR EXISTS (
+                SELECT 1 FROM ScheduleEntry se
+                WHERE se.crn = s.crn AND se.year = s.year AND se.term = s.term
+                AND se.instructor LIKE ?
+            )
+        )`);
+        args.push(q, q, q, q);
+    }
+    if (params.online === true) {
+        conditions.push(`EXISTS (
+            SELECT 1 FROM ScheduleEntry se
+            WHERE se.crn = s.crn AND se.year = s.year AND se.term = s.term
+            AND (se.type = 'WWW' OR se.room = 'WWW')
+        )`);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = db.query(`
+        SELECT DISTINCT s.year, s.term, s.crn, s.subject, s.courseCode,
+               s.section, s.abbreviatedTitle, s.credits, s.seats, s.waitlist
+        FROM Section s
+        ${where}
+        ORDER BY s.subject, s.courseCode, s.crn
+    `).all(...args) as any[];
+    return {
+        count: rows.length,
+        sections: rows.map(s => ({
+            year: s.year, term: s.term, crn: s.crn,
+            subject: s.subject, course_code: s.courseCode,
+            section: s.section, abbreviated_title: s.abbreviatedTitle,
+            credits: s.credits, seats: s.seats, waitlist: s.waitlist,
+        })),
+    };
+}
+
+function searchSectionsAdvanced(db: Database, params: {
+    subject?: string; course_code?: string; year?: number; term?: number;
+    title_search?: string; instructor_search?: string;
+    online?: boolean;
+    attr_2ar?: boolean; attr_2sc?: boolean; attr_hum?: boolean;
+    attr_lsc?: boolean; attr_sci?: boolean; attr_soc?: boolean; attr_ut?: boolean;
+    filter_open_seats?: boolean; filter_no_waitlist?: boolean; filter_not_cancelled?: boolean;
+    page?: number; sections_per_page?: number;
+}) {
+    const page             = Math.max(1, params.page             ?? 1);
+    const sections_per_page = Math.min(200, Math.max(1, params.sections_per_page ?? 100));
+    const offset           = (page - 1) * sections_per_page;
+
+    const conditions: string[] = [];
+    const args: any[] = [];
+
+    if (params.year)        { conditions.push(`s.year = ?`);         args.push(params.year); }
+    if (params.term)        { conditions.push(`s.term = ?`);         args.push(params.term); }
+    if (params.subject)     { conditions.push(`s.subject = ?`);      args.push(params.subject.toUpperCase()); }
+    if (params.course_code) { conditions.push(`s.courseCode = ?`);   args.push(params.course_code); }
+    if (params.title_search) {
+        const q = `%${params.title_search}%`;
+        conditions.push(`s.abbreviatedTitle LIKE ?`);
+        args.push(q);
+    }
+    if (params.instructor_search) {
+        const q = `%${params.instructor_search}%`;
+        conditions.push(`EXISTS (
+            SELECT 1 FROM ScheduleEntry se
+            WHERE se.crn = s.crn AND se.year = s.year AND se.term = s.term
+            AND se.instructor LIKE ?
+        )`);
+        args.push(q);
+    }
+    if (params.online === true) {
+        conditions.push(`EXISTS (
+            SELECT 1 FROM ScheduleEntry se
+            WHERE se.crn = s.crn AND se.year = s.year AND se.term = s.term
+            AND (se.type = 'WWW' OR se.room = 'WWW')
+        )`);
+    }
+    if (params.filter_open_seats)    { conditions.push(`(CAST(s.seats AS INTEGER) > 0)`); }
+    if (params.filter_no_waitlist)   { conditions.push(`(s.waitlist IS NULL OR s.waitlist = '' OR CAST(s.waitlist AS INTEGER) = 0)`); }
+    if (params.filter_not_cancelled) { conditions.push(`s.seats NOT LIKE 'Cancel%' AND s.seats NOT LIKE 'Inact%'`); }
+
+    const attrMap: [keyof typeof params, string][] = [
+        ['attr_2ar', 'attr2AR'], ['attr_2sc', 'attr2SC'], ['attr_hum', 'attrHUM'],
+        ['attr_lsc', 'attrLSC'], ['attr_sci', 'attrSCI'], ['attr_soc', 'attrSOC'],
+        ['attr_ut',  'attrUT'],
+    ];
+    const attrFilters: string[] = [];
+    for (const [param, col] of attrMap) {
+        if (params[param] === true) attrFilters.push(`c.${col} = 1`);
+    }
+    const attrJoin = attrFilters.length
+        ? `INNER JOIN Course c ON c.subject = s.subject AND c.courseCode = s.courseCode AND ${attrFilters.join(' AND ')}`
+        : '';
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const total = (db.query(`
+        SELECT COUNT(*) as n FROM Section s ${attrJoin} ${where}
+    `).get(...args) as any).n as number;
+
+    const sections = db.query(`
+        SELECT s.* FROM Section s ${attrJoin} ${where}
+        ORDER BY s.subject, s.courseCode, s.crn
+        LIMIT ? OFFSET ?
+    `).all(...args, sections_per_page, offset) as any[];
+
+    const crns = sections.map(s => s.crn);
+    const scheduleRows = crns.length
+        ? db.query(`SELECT * FROM ScheduleEntry WHERE crn IN (${crns.map(() => '?').join(',')}) ORDER BY crn, scheduleIndex`)
+              .all(...crns) as any[]
+        : [];
+
+    return {
+        page, sections_per_page,
+        total_count: total,
+        total_pages: Math.ceil(total / sections_per_page),
+        sections: shapeSections(sections, scheduleRows),
+    };
+}
+
+// Simple course search — lightweight index results (matches /v1/search/courses)
+function searchCoursesSimple(db: Database, params: {
+    query?: string;
+    attr_2ar?: boolean; attr_2sc?: boolean; attr_hum?: boolean;
+    attr_lsc?: boolean; attr_sci?: boolean; attr_soc?: boolean; attr_ut?: boolean;
+    transfers_to?: string[];
+    on_langara_website?: boolean;
+}) {
+    const conditions: string[] = [];
+    const args: any[] = [];
+
+    if (params.query) {
+        const q = `%${params.query}%`;
+        conditions.push(`(subject LIKE ? OR courseCode LIKE ? OR title LIKE ? OR description LIKE ?)`);
+        args.push(q, q, q, q);
+    }
+    const attrMap: [keyof typeof params, string][] = [
+        ['attr_2ar', 'attr2AR'], ['attr_2sc', 'attr2SC'], ['attr_hum', 'attrHUM'],
+        ['attr_lsc', 'attrLSC'], ['attr_sci', 'attrSCI'], ['attr_soc', 'attrSOC'],
+        ['attr_ut',  'attrUT'],
+    ];
+    for (const [param, col] of attrMap) {
+        if (params[param] === true) { conditions.push(`${col} = 1`); }
+    }
+    if (params.on_langara_website === true) { conditions.push(`onLangaraWebsite = 1`); }
+    if (params.transfers_to && params.transfers_to.length > 0) {
+        for (const dest of params.transfers_to) {
+            conditions.push(`EXISTS (SELECT 1 FROM Transfer t WHERE t.subject = subject AND t.courseNumber = courseCode AND t.destination = ?)`);
+            args.push(dest.toUpperCase());
+        }
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = db.query(`
+        SELECT subject, courseCode, title, onLangaraWebsite FROM Course ${where}
+        ORDER BY subject, courseCode
+    `).all(...args) as any[];
+
+    return {
+        count: rows.length,
+        courses: rows.map(r => ({
+            subject: r.subject,
+            course_code: r.courseCode,
+            title: r.title,
+            on_langara_website: r.onLangaraWebsite === 1,
+        })),
+    };
+}
+
+// Full course search — paginated with rich filters (matches /v2/search/courses)
+function searchCourses(db: Database, params: {
+    query?: string; title_search?: string; subject?: string; course_code?: string;
+    attr_2ar?: boolean; attr_2sc?: boolean; attr_hum?: boolean;
+    attr_lsc?: boolean; attr_sci?: boolean; attr_soc?: boolean; attr_ut?: boolean;
+    credits?: number;
+    on_langara_website?: boolean;
+    offered_online?: boolean;
+    prerequisites?: boolean;
+    transfer_destinations?: string[];
+    page?: number; limit?: number;
+}) {
+    const page   = Math.max(1, params.page  ?? 1);
+    const limit  = Math.min(200, Math.max(1, params.limit ?? 20));
+    const offset = (page - 1) * limit;
+
+    const conditions: string[] = [];
+    const args: any[] = [];
+
+    if (params.subject)      { conditions.push(`subject = ?`);    args.push(params.subject.toUpperCase()); }
+    if (params.course_code)  { conditions.push(`courseCode = ?`); args.push(params.course_code); }
+    if (params.title_search) {
+        conditions.push(`title LIKE ?`);
+        args.push(`%${params.title_search}%`);
+    }
+    if (params.query) {
+        const q = `%${params.query}%`;
+        conditions.push(`(subject LIKE ? OR courseCode LIKE ? OR title LIKE ? OR description LIKE ?)`);
+        args.push(q, q, q, q);
+    }
+    if (params.credits != null)          { conditions.push(`credits = ?`);            args.push(params.credits); }
+    if (params.on_langara_website === true) { conditions.push(`onLangaraWebsite = 1`); }
+    if (params.prerequisites === true)   { conditions.push(`(descPrerequisites IS NOT NULL AND descPrerequisites != '') OR (descRequisitesCatalogue IS NOT NULL AND descRequisitesCatalogue != '')`); }
+    if (params.offered_online === true) {
+        conditions.push(`EXISTS (
+            SELECT 1 FROM Section s
+            INNER JOIN ScheduleEntry se ON se.crn = s.crn AND se.year = s.year AND se.term = s.term
+            WHERE s.subject = subject AND s.courseCode = courseCode
+            AND (se.type = 'WWW' OR se.room = 'WWW')
+        )`);
+    }
+    const attrMap: [keyof typeof params, string][] = [
+        ['attr_2ar', 'attr2AR'], ['attr_2sc', 'attr2SC'], ['attr_hum', 'attrHUM'],
+        ['attr_lsc', 'attrLSC'], ['attr_sci', 'attrSCI'], ['attr_soc', 'attrSOC'],
+        ['attr_ut',  'attrUT'],
+    ];
+    for (const [param, col] of attrMap) {
+        if (params[param] === true) { conditions.push(`${col} = 1`); }
+    }
+    if (params.transfer_destinations && params.transfer_destinations.length > 0) {
+        for (const dest of params.transfer_destinations) {
+            conditions.push(`EXISTS (SELECT 1 FROM Transfer t WHERE t.subject = subject AND t.courseNumber = courseCode AND t.destination = ?)`);
+            args.push(dest.toUpperCase());
+        }
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const total = (db.query(`SELECT COUNT(*) as n FROM Course ${where}`).get(...args) as any).n as number;
+    const rows  = db.query(`
+        SELECT * FROM Course ${where}
+        ORDER BY subject, courseCode
+        LIMIT ? OFFSET ?
+    `).all(...args, limit, offset) as any[];
+
+    return {
+        page, limit,
+        total_count: total,
+        total_pages: Math.ceil(total / limit),
+        courses: rows.map(shapeCourseRow),
+    };
+}
+
+// ─── Transfer by institution ──────────────────────────────────────────────────
+
+function getTransfersByInstitution(db: Database, institution: string) {
+    const rows = db.query(`
+        SELECT * FROM Transfer WHERE destination = ?
+        ORDER BY subject, courseNumber, effectiveEnd IS NULL DESC, effectiveStart DESC
+    `).all(institution.toUpperCase()) as any[];
+    return { institution: institution.toUpperCase(), count: rows.length, transfers: rows };
+}
+
+function getCourseTransfers(db: Database, subject: string, courseCode: string) {
+    const rows = db.query(`
+        SELECT * FROM Transfer
+        WHERE subject = ? AND courseNumber = ?
+        ORDER BY effectiveEnd IS NULL DESC, effectiveStart DESC
+    `).all(subject.toUpperCase(), courseCode) as any[];
+    return {
+        subject: subject.toUpperCase(),
+        course_code: courseCode,
+        count: rows.length,
+        transfers: rows,
+    };
 }
 
 function getTransferDestinations(db: Database) {
@@ -61,6 +497,14 @@ export function createPublicApi(db: Database) {
                     version: "3.0.0",
                     description: "Public read-only API for course and transfer data",
                 },
+                tags: [
+                    { name: "Health",    description: "Service health and version information" },
+                    { name: "Index",     description: "Top-level index lists — semesters, subjects, and all courses" },
+                    { name: "Semester",  description: "All courses or sections offered in a specific semester" },
+                    { name: "Courses",   description: "Detailed information for individual courses" },
+                    { name: "Search",    description: "Search and filter courses and sections" },
+                    { name: "Transfers", description: "BC Transfer Guide credit transfer agreements" },
+                ],
             },
             // references: fromTypes({ path: './types.ts' }),
         }))
@@ -70,6 +514,7 @@ export function createPublicApi(db: Database) {
             database: "connected",
             version: "3.0.0",
         }), {
+            detail: { tags: ["Health"], summary: "Health check" },
             response: t.Object({
                 status: t.String(),
                 timestamp: t.String(),
@@ -78,12 +523,14 @@ export function createPublicApi(db: Database) {
             })
         })
         .get("api/v3/index/latest_semester", () => getLatestSemester(db), {
+            detail: { tags: ["Index"], summary: "Latest semester" },
             response: t.Object({
                 term: t.Number(),
                 year: t.Number(),
             })
         })
         .get("api/v3/index/semesters", () => getAllSemesters(db), {
+            detail: { tags: ["Index"], summary: "All semesters" },
             response: t.Object({
                 count: t.Number(),
                 semesters: t.Array(t.Object({
@@ -92,13 +539,16 @@ export function createPublicApi(db: Database) {
                 })),
             })
         })
-        .get("api/v3/index/subjects", () => getAllSubjects(db), {
+        .get("api/v3/index/subjects", ({ query }) => getAllSubjects(db, query.all === 'true'), {
+            detail: { tags: ["Index"], summary: "All subjects" },
+            query: t.Object({ all: t.Optional(t.String()) }),
             response: t.Object({
                 count: t.Number(),
                 subjects: t.Array(t.String()),
             })
         })
-        .get("api/v3/index/courses", () => getAllCourses(), {
+        .get("api/v3/index/courses", () => getAllCourses(db), {
+            detail: { tags: ["Index"], summary: "All courses (index)" },
             response: t.Object({
                 subject_count: t.Number(),
                 course_count: t.Number(),
@@ -110,7 +560,183 @@ export function createPublicApi(db: Database) {
                 })),
             })
         })
+        .get("api/v3/courses/:subject/:code", ({ params }) => {
+            const course = getCourse(db, params.subject, params.code);
+            if (!course) return new Response(JSON.stringify({ error: "Course not found" }), { status: 404, headers });
+            return course;
+        }, {
+            detail: { tags: ["Courses"], summary: "Course detail with sections, transfers, and outlines" },
+        })
+        // ── Semester ──────────────────────────────────────────────────────────
+        .get("api/v3/semester/:year/:term/courses", ({ params }) => {
+            return getSemesterCourses(db, Number(params.year), Number(params.term));
+        }, {
+            detail: { tags: ["Semester"], summary: "Courses offered in a semester" },
+        })
+        .get("api/v3/semester/:year/:term/sections", ({ params }) => {
+            return getSemesterSections(db, Number(params.year), Number(params.term));
+        }, {
+            detail: { tags: ["Semester"], summary: "All sections in a semester with schedules" },
+        })
+        .get("api/v3/section/:year/:term/:crn", ({ params }) => {
+            const section = getSection(db, Number(params.year), Number(params.term), Number(params.crn));
+            if (!section) return new Response(JSON.stringify({ error: "Section not found" }), { status: 404, headers });
+            return section;
+        }, {
+            detail: { tags: ["Semester"], summary: "Single section detail" },
+        })
+        // ── Search ────────────────────────────────────────────────────────────
+        .get("api/v3/search/sections", ({ query }) => {
+            return searchSections(db, {
+                query:  query.query  as string | undefined,
+                year:   query.year   ? Number(query.year)   : undefined,
+                term:   query.term   ? Number(query.term)   : undefined,
+                online: query.online === 'true',
+            });
+        }, {
+            detail: { tags: ["Search"], summary: "Search sections by keyword" },
+            query: t.Object({
+                query:  t.Optional(t.String()),
+                year:   t.Optional(t.String()),
+                term:   t.Optional(t.String()),
+                online: t.Optional(t.String()),
+            }),
+        })
+        .get("api/v3/search/sections/advanced", ({ query }) => {
+            // transfer_destinations may come in as repeated params: ?transfer_destinations=UBCV&transfer_destinations=SFU
+            const td = query.transfer_destinations;
+            return searchSectionsAdvanced(db, {
+                subject:              query.subject              as string | undefined,
+                course_code:          query.course_code          as string | undefined,
+                year:                 query.year                 ? Number(query.year)  : undefined,
+                term:                 query.term                 ? Number(query.term)  : undefined,
+                title_search:         query.title_search         as string | undefined,
+                instructor_search:    query.instructor_search    as string | undefined,
+                online:               query.online               === 'true',
+                attr_2ar:             query.attr_2ar             === 'true',
+                attr_2sc:             query.attr_2sc             === 'true',
+                attr_hum:             query.attr_hum             === 'true',
+                attr_lsc:             query.attr_lsc             === 'true',
+                attr_sci:             query.attr_sci             === 'true',
+                attr_soc:             query.attr_soc             === 'true',
+                attr_ut:              query.attr_ut              === 'true',
+                filter_open_seats:    query.filter_open_seats    === 'true',
+                filter_no_waitlist:   query.filter_no_waitlist   === 'true',
+                filter_not_cancelled: query.filter_not_cancelled === 'true',
+                page:                 query.page             ? Number(query.page)             : undefined,
+                sections_per_page:    query.sections_per_page ? Number(query.sections_per_page) : undefined,
+            });
+        }, {
+            detail: { tags: ["Search"], summary: "Advanced section search with attribute filters (paginated)" },
+            query: t.Object({
+                subject:              t.Optional(t.String()),
+                course_code:          t.Optional(t.String()),
+                year:                 t.Optional(t.String()),
+                term:                 t.Optional(t.String()),
+                title_search:         t.Optional(t.String()),
+                instructor_search:    t.Optional(t.String()),
+                online:               t.Optional(t.String()),
+                attr_2ar:             t.Optional(t.String()),
+                attr_2sc:             t.Optional(t.String()),
+                attr_hum:             t.Optional(t.String()),
+                attr_lsc:             t.Optional(t.String()),
+                attr_sci:             t.Optional(t.String()),
+                attr_soc:             t.Optional(t.String()),
+                attr_ut:              t.Optional(t.String()),
+                filter_open_seats:    t.Optional(t.String()),
+                filter_no_waitlist:   t.Optional(t.String()),
+                filter_not_cancelled: t.Optional(t.String()),
+                page:                 t.Optional(t.String()),
+                sections_per_page:    t.Optional(t.String()),
+            }),
+        })
+        .get("api/v3/search/courses/simple", ({ query }) => {
+            const td = query.transfers_to;
+            return searchCoursesSimple(db, {
+                query:              query.query              as string | undefined,
+                attr_2ar:           query.attr_2ar           === 'true',
+                attr_2sc:           query.attr_2sc           === 'true',
+                attr_hum:           query.attr_hum           === 'true',
+                attr_lsc:           query.attr_lsc           === 'true',
+                attr_sci:           query.attr_sci           === 'true',
+                attr_soc:           query.attr_soc           === 'true',
+                attr_ut:            query.attr_ut            === 'true',
+                on_langara_website: query.on_langara_website === 'true',
+                transfers_to:       td ? (Array.isArray(td) ? td : [td]) : undefined,
+            });
+        }, {
+            detail: { tags: ["Search"], summary: "Search courses — lightweight index results" },
+            query: t.Object({
+                query:              t.Optional(t.String()),
+                attr_2ar:           t.Optional(t.String()),
+                attr_2sc:           t.Optional(t.String()),
+                attr_hum:           t.Optional(t.String()),
+                attr_lsc:           t.Optional(t.String()),
+                attr_sci:           t.Optional(t.String()),
+                attr_soc:           t.Optional(t.String()),
+                attr_ut:            t.Optional(t.String()),
+                on_langara_website: t.Optional(t.String()),
+                transfers_to:       t.Optional(t.Union([t.String(), t.Array(t.String())])),
+            }),
+        })
+        .get("api/v3/search/courses", ({ query }) => {
+            const td = query.transfer_destinations;
+            return searchCourses(db, {
+                query:                query.query                as string | undefined,
+                title_search:         query.title_search         as string | undefined,
+                subject:              query.subject              as string | undefined,
+                course_code:          query.course_code          as string | undefined,
+                attr_2ar:             query.attr_2ar             === 'true',
+                attr_2sc:             query.attr_2sc             === 'true',
+                attr_hum:             query.attr_hum             === 'true',
+                attr_lsc:             query.attr_lsc             === 'true',
+                attr_sci:             query.attr_sci             === 'true',
+                attr_soc:             query.attr_soc             === 'true',
+                attr_ut:              query.attr_ut              === 'true',
+                credits:              query.credits              ? Number(query.credits) : undefined,
+                on_langara_website:   query.on_langara_website   === 'true',
+                offered_online:       query.offered_online       === 'true',
+                prerequisites:        query.prerequisites        === 'true',
+                transfer_destinations: td ? (Array.isArray(td) ? td : [td]) : undefined,
+                page:                 query.page  ? Number(query.page)  : undefined,
+                limit:                query.limit ? Number(query.limit) : undefined,
+            });
+        }, {
+            detail: { tags: ["Search"], summary: "Search courses with attribute and transfer filters (paginated)" },
+            query: t.Object({
+                query:                 t.Optional(t.String()),
+                title_search:          t.Optional(t.String()),
+                subject:               t.Optional(t.String()),
+                course_code:           t.Optional(t.String()),
+                attr_2ar:              t.Optional(t.String()),
+                attr_2sc:              t.Optional(t.String()),
+                attr_hum:              t.Optional(t.String()),
+                attr_lsc:              t.Optional(t.String()),
+                attr_sci:              t.Optional(t.String()),
+                attr_soc:              t.Optional(t.String()),
+                attr_ut:               t.Optional(t.String()),
+                credits:               t.Optional(t.String()),
+                on_langara_website:    t.Optional(t.String()),
+                offered_online:        t.Optional(t.String()),
+                prerequisites:         t.Optional(t.String()),
+                transfer_destinations: t.Optional(t.Union([t.String(), t.Array(t.String())])),
+                page:                  t.Optional(t.String()),
+                limit:                 t.Optional(t.String()),
+            }),
+        })
+        // ── Transfers ─────────────────────────────────────────────────────────
+        .get("api/v3/courses/:subject/:code/transfers", ({ params }) => {
+            return getCourseTransfers(db, params.subject, params.code);
+        }, {
+            detail: { tags: ["Transfers"], summary: "Transfer agreements for a course" },
+        })
+        .get("api/v3/transfers/:institution", ({ params }) => {
+            return getTransfersByInstitution(db, params.institution);
+        }, {
+            detail: { tags: ["Transfers"], summary: "All transfers to an institution" },
+        })
         .get("api/v3/index/transfer_destinations", () => getTransferDestinations(db), {
+            detail: { tags: ["Transfers"], summary: "All transfer destinations" },
             response: t.Object({
                 count: t.Number(),
                 transfers: t.Array(t.Object({

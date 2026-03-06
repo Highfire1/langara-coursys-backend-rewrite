@@ -9,8 +9,11 @@ import {
     fetchSemesterCatalogue,
     fetchSemesterAttributes,
     fetchTransferCredits,
-    fetchTransferCreditSubjects
+    fetchLangaraCoursePage,
 } from "./fetchers/index.ts";
+import { runDiscoverSemesters, runDiscoverTransferSubjects, runDiscoverLangaraCourses } from "./meta/index.ts";
+
+const META_SOURCE_TYPES = new Set(['DiscoverSemesters', 'DiscoverTransferSubjects', 'DiscoverLangaraCourses']);
 
 const db = new Database("./data/database.sqlite");
 
@@ -57,8 +60,14 @@ async function fetchSource(source: Source): Promise<FetchResult> {
             return fetchSemesterCatalogue(source.sourceIdentifier);
         case 'SemesterAttributes':
             return fetchSemesterAttributes(source.sourceIdentifier);
-        case 'TransferCreditSubjects':
-            return fetchTransferCreditSubjects(source.sourceIdentifier, db);
+        case 'DiscoverSemesters':
+            return runDiscoverSemesters(db);
+        case 'DiscoverTransferSubjects':
+            return runDiscoverTransferSubjects(db);
+        case 'DiscoverLangaraCourses':
+            return runDiscoverLangaraCourses(db);
+        case 'LangaraCoursePage':
+            return fetchLangaraCoursePage(source.sourceIdentifier);
         case 'TransferCredits':
             return fetchTransferCredits(source.sourceIdentifier);
         default:
@@ -96,14 +105,17 @@ async function processSource(source: Source): Promise<void> {
         
         // Insert into SourceFetched and update Source in a transaction
         db.transaction(() => {
+            // Meta tasks are fully handled inline — mark them as parsed immediately
+            const parsedFlag = META_SOURCE_TYPES.has(source.sourceType) ? 1 : 0;
             db.run(
-                `INSERT INTO SourceFetched (sourceId, fetchedAt, contentHash, contentType, contentLink, parsed) VALUES (?, ?, ?, ?, ?, 0)`,
+                `INSERT INTO SourceFetched (sourceId, fetchedAt, contentHash, contentType, contentLink, parsed) VALUES (?, ?, ?, ?, ?, ?)`,
                 [
                     source.id,
                     fetchedAt.toISOString(),
                     contentHash,
                     contentType,
-                    contentLink
+                    contentLink,
+                    parsedFlag
                 ]
             );
             

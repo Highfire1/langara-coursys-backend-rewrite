@@ -6,30 +6,37 @@ export interface SourceListItem {
     nextFetchIn: string;
 }
 
-export function renderSourcesList(sources: SourceListItem[]): string {
-    const sourcesByType = sources.reduce((acc, src) => {
-        if (!acc[src.sourceType]) acc[src.sourceType] = [] as SourceListItem[];
-        acc[src.sourceType].push(src);
-        return acc;
-    }, {} as Record<string, SourceListItem[]>);
+const META_PREFIX = 'Discover';
 
-    let sourcesHtml = '';
-    for (const [type, srcs] of Object.entries(sourcesByType)) {
-        sourcesHtml += `
-        <div class="source-group">
-            <h3>${type}</h3>
-            <div class="source-table">
-                ${srcs.map(src => `
-                <a href="/sources/${src.id}" class="source-row">
-                    <div class="source-id">${src.id}</div>
-                    <div class="source-identifier">${src.sourceIdentifier || '—'}</div>
-                    <div class="source-status ${src.status.toLowerCase()}">${src.status}</div>
-                    <div class="source-fetch">${src.nextFetchIn}</div>
-                </a>
-                `).join('')}
-            </div>
-        </div>`;
+function renderSourceGroup(type: string, srcs: SourceListItem[]): string {
+    return `
+    <div class="source-group">
+        <h3>${type}</h3>
+        <div class="source-table">
+            ${srcs.map(src => `
+            <a href="/sources/${src.id}" class="source-row">
+                <div class="source-id">${src.id}</div>
+                <div class="source-identifier">${src.sourceIdentifier || '—'}</div>
+                <div class="source-status ${src.status.toLowerCase()}">${src.status}</div>
+                <div class="source-fetch">${src.nextFetchIn}</div>
+            </a>
+            `).join('')}
+        </div>
+    </div>`;
+}
+
+export function renderSourcesList(sources: SourceListItem[]): string {
+    const metaSources: Record<string, SourceListItem[]> = {};
+    const regularSources: Record<string, SourceListItem[]> = {};
+
+    for (const src of sources) {
+        const bucket = src.sourceType.startsWith(META_PREFIX) ? metaSources : regularSources;
+        if (!bucket[src.sourceType]) bucket[src.sourceType] = [];
+        bucket[src.sourceType].push(src);
     }
+
+    const metaHtml = Object.entries(metaSources).map(([type, srcs]) => renderSourceGroup(type, srcs)).join('');
+    const regularHtml = Object.entries(regularSources).map(([type, srcs]) => renderSourceGroup(type, srcs)).join('');
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -59,6 +66,17 @@ export function renderSourcesList(sources: SourceListItem[]): string {
             padding-bottom: 8px;
             border-bottom: 1px solid #30363d;
         }
+        .section-header {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #8b949e;
+            margin: 32px 0 16px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #30363d;
+        }
+        .section-header:first-child { margin-top: 0; }
         .source-table { display: flex; flex-direction: column; gap: 8px; }
         .source-row {
             display: grid;
@@ -121,7 +139,8 @@ export function renderSourcesList(sources: SourceListItem[]): string {
             <h1>📚 Data Sources</h1>
         </header>
 
-        ${sourcesHtml}
+        ${metaHtml ? `<p class="section-header">Meta Tasks</p>${metaHtml}` : ''}
+        ${regularHtml ? `<p class="section-header">Data Sources</p>${regularHtml}` : ''}
     </div>
 </body>
 </html>`;

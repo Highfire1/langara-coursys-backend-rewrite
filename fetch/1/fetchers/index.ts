@@ -3,4 +3,5 @@ export { fetchSemesterSearch } from "./semesterSearch.ts";
 export { fetchSemesterCatalogue } from "./semesterCatalogue.ts";
 export { fetchSemesterAttributes } from "./semesterAttributes.ts";
 export { fetchTransferCredits } from "./transferCredits.ts";
-export { fetchTransferCreditSubjects } from "./transferCreditSubjects.ts";
+export { fetchLangaraCoursePage } from "./langaraCoursePage.ts";
+// transferCreditSubjects was superseded by the DiscoverTransferSubjects meta task (fetch/1/meta/discoverTransferSubjects.ts)

@@ -5,7 +5,7 @@ const processes: ReturnType<typeof spawn>[] = [];
 async function startServer() {
     console.log("Starting server on port 3000...");
     const server = spawn({
-        cmd: ["bun", "run", "serve/index.ts"],
+        cmd: ["bun", "run", "serve.ts"],
         cwd: import.meta.dir,
         stdout: "inherit",
         stderr: "inherit",
@@ -18,7 +18,7 @@ async function startServer() {
 async function startFetch() {
     console.log("Starting fetch service...");
     const fetcher = spawn({
-        cmd: ["bun", "run", "fetch/index.ts"],
+        cmd: ["bun", "run", "fetch.ts"],
         cwd: import.meta.dir,
         stdout: "inherit",
         stderr: "inherit",

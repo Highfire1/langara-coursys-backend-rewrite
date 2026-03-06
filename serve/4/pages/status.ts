@@ -26,16 +26,20 @@ export interface RecentFetch {
     parsed: boolean;
 }
 
-export function renderStatusPage(stats: StatusStats, sources: StatusSource[], recentFetches: RecentFetch[]): string {
-    const groupedBySources = sources.reduce((acc, src) => {
-        if (!acc[src.sourceType]) acc[src.sourceType] = [] as StatusSource[];
-        acc[src.sourceType].push(src);
-        return acc;
-    }, {} as Record<string, StatusSource[]>);
+const META_PREFIX = 'Discover';
 
-    let sourceGroupsHtml = '';
-    for (const [type, srcs] of Object.entries(groupedBySources)) {
-        sourceGroupsHtml += `
+export function renderStatusPage(stats: StatusStats, sources: StatusSource[], recentFetches: RecentFetch[]): string {
+    const metaGroups: Record<string, StatusSource[]> = {};
+    const regularGroups: Record<string, StatusSource[]> = {};
+
+    for (const src of sources) {
+        const bucket = src.sourceType.startsWith(META_PREFIX) ? metaGroups : regularGroups;
+        if (!bucket[src.sourceType]) bucket[src.sourceType] = [];
+        bucket[src.sourceType].push(src);
+    }
+
+    function renderGroup(type: string, srcs: StatusSource[]): string {
+        return `
         <div class="source-group">
             <h3>${type}</h3>
             <table class="source-table">
@@ -64,6 +68,9 @@ export function renderStatusPage(stats: StatusStats, sources: StatusSource[], re
             </table>
         </div>`;
     }
+
+    const metaGroupsHtml = Object.entries(metaGroups).map(([t, s]) => renderGroup(t, s)).join('');
+    const regularGroupsHtml = Object.entries(regularGroups).map(([t, s]) => renderGroup(t, s)).join('');
 
     const recentFetchesHtml = recentFetches.map(f => `
         <div class="recent-item">
@@ -120,6 +127,17 @@ export function renderStatusPage(stats: StatusStats, sources: StatusSource[], re
             padding-bottom: 8px;
             border-bottom: 1px solid #30363d;
         }
+        .section-header {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #8b949e;
+            margin: 32px 0 16px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #30363d;
+        }
+        .section-header:first-child { margin-top: 0; }
         .source-table {
             width: 100%;
             border-collapse: collapse;
@@ -234,7 +252,8 @@ export function renderStatusPage(stats: StatusStats, sources: StatusSource[], re
             </div>
         </div>
 
-        ${sourceGroupsHtml}
+        ${metaGroupsHtml ? `<p class="section-header">Meta Tasks</p>${metaGroupsHtml}` : ''}
+        ${regularGroupsHtml ? `<p class="section-header">Data Sources</p>${regularGroupsHtml}` : ''}
 
         <div class="recent-section">
             <h2>Recent Fetches</h2>
