@@ -111,11 +111,11 @@ async function getSubjectPage(
         body: formData
     });
     
+    const responseText = await response.text();
     try {
-        return await response.json() as PageResponse;
+        return JSON.parse(responseText) as PageResponse;
     } catch (error) {
         console.error("[TransferCredits] Failed to parse JSON response:", error);
-        const responseText = await response.text();
         console.error("[TransferCredits] Response text:", responseText);
         throw new Error("[TransferCredits] Unable to parse response as JSON");
     }
