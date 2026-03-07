@@ -441,8 +441,20 @@ function searchCourses(db: Database, params: {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const total = (db.query(`SELECT COUNT(*) as n FROM Course ${where}`).get(...args) as any).n as number;
     const rows  = db.query(`
-        SELECT * FROM Course ${where}
-        ORDER BY subject, courseCode
+        SELECT c.*,
+            EXISTS (
+                SELECT 1 FROM Section s
+                WHERE s.subject = c.subject AND s.courseCode = c.courseCode
+                AND s.section LIKE 'W%'
+            ) AS offeredOnline,
+            (SELECT s.year FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year ASC,  s.term ASC  LIMIT 1) AS firstOfferedYear,
+            (SELECT s.term FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year ASC,  s.term ASC  LIMIT 1) AS firstOfferedTerm,
+            (SELECT s.year FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year DESC, s.term DESC LIMIT 1) AS lastOfferedYear,
+            (SELECT s.term FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year DESC, s.term DESC LIMIT 1) AS lastOfferedTerm,
+            (SELECT GROUP_CONCAT(DISTINCT t.destination ORDER BY t.destination)
+             FROM Transfer t WHERE t.subject = c.subject AND t.courseNumber = c.courseCode) AS transferDestinations
+        FROM Course c ${where}
+        ORDER BY c.subject, c.courseCode
         LIMIT ? OFFSET ?
     `).all(...args, limit, offset) as any[];
 
@@ -450,7 +462,15 @@ function searchCourses(db: Database, params: {
         page, limit,
         total_count: total,
         total_pages: Math.ceil(total / limit),
-        courses: rows.map(shapeCourseRow),
+        courses: rows.map(r => ({
+            ...shapeCourseRow(r),
+            offered_online:      r.offeredOnline === 1,
+            first_offered_year:  r.firstOfferedYear  ?? null,
+            first_offered_term:  r.firstOfferedTerm  ?? null,
+            last_offered_year:   r.lastOfferedYear   ?? null,
+            last_offered_term:   r.lastOfferedTerm   ?? null,
+            transfer_destinations: r.transferDestinations ?? null,
+        })),
     };
 }
 
