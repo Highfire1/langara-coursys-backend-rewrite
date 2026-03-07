@@ -554,6 +554,19 @@ function getApiStatus(db: Database) {
     };
 }
 
+// ─── Cache helpers ───────────────────────────────────────────────────────────
+
+/** Returns seconds until the next scheduled fetch for the given source types, clamped to [60, 604800]. */
+function getCacheMaxAge(db: Database, sourceTypes: string[]): number {
+    const placeholders = sourceTypes.map(() => '?').join(',');
+    const row = db.query(
+        `SELECT MIN(nextFetch) as next FROM Source WHERE sourceType IN (${placeholders}) AND isActive = 1`
+    ).get(...sourceTypes) as { next: string | null } | null;
+    if (!row?.next) return 3600;
+    const seconds = Math.floor((new Date(row.next).getTime() - Date.now()) / 1000);
+    return Math.max(60, Math.min(seconds, 604800)); // clamp: 1 min → 1 week
+}
+
 export function createPublicApi(db: Database) {
     return new Elysia( { strictPath: true } )
         .use(openapi({
@@ -575,6 +588,24 @@ export function createPublicApi(db: Database) {
             },
             // references: fromTypes({ path: './types.ts' }),
         }))
+        .onAfterHandle(({ path, set }) => {
+            // No caching for health check or API docs
+            if (!path.includes('v3')) return;
+            // Status: short TTL so clients can poll initialisation progress
+            if (path.includes('status')) {
+                set.headers['Cache-Control'] = 'public, max-age=60, s-maxage=60';
+                return;
+            }
+            // Transfer-primary routes: cache until next TransferCredits fetch
+            if (path.includes('transfer')) {
+                const maxAge = getCacheMaxAge(db, ['TransferCredits']);
+                set.headers['Cache-Control'] = `public, max-age=${maxAge}, s-maxage=${maxAge}`;
+                return;
+            }
+            // All other v3 routes: cache until next course/section data fetch
+            const maxAge = getCacheMaxAge(db, ['SemesterSearch', 'SemesterCatalogue', 'SemesterAttributes', 'LangaraCoursePage']);
+            set.headers['Cache-Control'] = `public, max-age=${maxAge}, s-maxage=${maxAge}`;
+        })
         .get("api/health", () => ({
             status: "healthy",
             timestamp: new Date().toISOString(),
