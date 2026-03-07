@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { openapi, fromTypes } from "@elysiajs/openapi";
+import { cors } from "@elysiajs/cors";
 import { Database } from "bun:sqlite";
 
 const headers = { "Content-Type": "application/json" } as const;
@@ -569,6 +570,7 @@ function getCacheMaxAge(db: Database, sourceTypes: string[]): number {
 
 export function createPublicApi(db: Database) {
     return new Elysia( { strictPath: true } )
+        .use(cors({ origin: '*' }))
         .use(openapi({
             path: "/api",
             documentation: {
