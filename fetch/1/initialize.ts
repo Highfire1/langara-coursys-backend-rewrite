@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { fetchConfig } from "../config.ts";
 
 const db = new Database("./data/database.sqlite");
 
@@ -24,9 +25,9 @@ db.run(`
 // - DiscoverTransferSubjects: queries BC Transfer Guide for subject list and
 //                             registers TransferCredits sources for each subject.
 const metaTasks: { sourceType: string; sourceIdentifier: string; fetchFrequency: number }[] = [
-    { sourceType: "DiscoverSemesters",        sourceIdentifier: "all", fetchFrequency: 24 * 7 },
-    { sourceType: "DiscoverTransferSubjects", sourceIdentifier: "all", fetchFrequency: 24 * 7 },
-    { sourceType: "DiscoverLangaraCourses",   sourceIdentifier: "all", fetchFrequency: 24 * 7 },
+    { sourceType: "DiscoverSemesters",        sourceIdentifier: "all", fetchFrequency: fetchConfig.frequencies.DiscoverSemesters },
+    { sourceType: "DiscoverTransferSubjects", sourceIdentifier: "all", fetchFrequency: fetchConfig.frequencies.DiscoverTransferSubjects },
+    { sourceType: "DiscoverLangaraCourses",   sourceIdentifier: "all", fetchFrequency: fetchConfig.frequencies.DiscoverLangaraCourses },
 ];
 
 for (const task of metaTasks) {

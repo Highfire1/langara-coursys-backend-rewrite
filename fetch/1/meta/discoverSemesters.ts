@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import type { FetchResult } from "../fetchers/types.ts";
+import { fetchConfig } from "../../config.ts";
 
 const BASE_URL = "https://swing.langara.bc.ca/prod";
 
@@ -58,9 +59,9 @@ function ensureSource(db: Database, sourceType: string, identifier: string, fetc
 
 function registerTerm(db: Database, term: string): boolean {
     // Returns true if anything was newly inserted
-    const a = ensureSource(db, "SemesterSearch",    term, 24);
-    const b = ensureSource(db, "SemesterCatalogue", term, 24 * 7);
-    const c = ensureSource(db, "SemesterAttributes", term, 24 * 7);
+    const a = ensureSource(db, "SemesterSearch",    term, fetchConfig.frequencies.SemesterSearch);
+    const b = ensureSource(db, "SemesterCatalogue", term, fetchConfig.frequencies.SemesterCatalogue);
+    const c = ensureSource(db, "SemesterAttributes", term, fetchConfig.frequencies.SemesterAttributes);
     return a || b || c;
 }
 

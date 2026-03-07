@@ -9,7 +9,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "strict": false,
-    "types": []
+    "types": ["bun-types"]
   },
   "include": ["fetch/**/*", "serve/**/*", "types.ts", "index.ts"]
 }

@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import type { FetchResult } from "../fetchers/types.ts";
+import { fetchConfig } from "../../config.ts";
 
 const BASE_URL = "https://langara.ca";
 const SUBJECTS_URL = `${BASE_URL}/programs-courses/search-courses/regular-studies-courses-subject-area`;
@@ -47,7 +48,7 @@ function ensureCourseSource(db: Database, slug: string): boolean {
     if (!existing) {
         db.run(
             `INSERT INTO Source (sourceType, sourceIdentifier, fetchFrequency, nextFetch, isActive) VALUES ('LangaraCoursePage', ?, ?, ?, 1)`,
-            [slug, 24 * 7, new Date().toISOString()]
+            [slug, fetchConfig.frequencies.LangaraCoursePage, new Date().toISOString()]
         );
         return true;
     }

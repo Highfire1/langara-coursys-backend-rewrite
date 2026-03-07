@@ -12,8 +12,25 @@ import {
     fetchLangaraCoursePage,
 } from "./fetchers/index.ts";
 import { runDiscoverSemesters, runDiscoverTransferSubjects, runDiscoverLangaraCourses } from "./meta/index.ts";
+import { fetchConfig, type SourceTypeName } from "../config.ts";
 
 const META_SOURCE_TYPES = new Set(['DiscoverSemesters', 'DiscoverTransferSubjects', 'DiscoverLangaraCourses']);
+
+/**
+ * Compute the next fetch time for a source, incorporating the configured stagger
+ * offset so that high-volume source types don't all re-queue at the same moment.
+ *
+ * Offset is deterministic per source (sourceId % offsetSeconds) so the spread
+ * is stable across restarts. First-run fetches are unaffected because INSERT
+ * always sets nextFetch = now.
+ */
+function nextFetchTime(source: Source, fetchedAt: Date): string {
+    const type = source.sourceType as SourceTypeName;
+    const freqMs    = source.fetchFrequency * 3_600_000;
+    const offsetSec = fetchConfig.offsets[type] ?? 0;
+    const offsetMs  = offsetSec > 0 ? (source.id % offsetSec) * 1_000 : 0;
+    return new Date(fetchedAt.getTime() + freqMs + offsetMs).toISOString();
+}
 
 const db = new Database("./data/database.sqlite");
 
@@ -92,7 +109,7 @@ async function processSource(source: Source): Promise<void> {
                 `UPDATE Source SET lastFetched = ?, nextFetch = ? WHERE id = ?`,
                 [
                     fetchedAt.toISOString(),
-                    new Date(fetchedAt.getTime() + source.fetchFrequency * 3600000).toISOString(),
+                    nextFetchTime(source, fetchedAt),
                     source.id
                 ]
             );
@@ -131,7 +148,7 @@ async function processSource(source: Source): Promise<void> {
                     fetchedAt.toISOString(),
                     fetchedAt.toISOString(),
                     contentHash,
-                    new Date(fetchedAt.getTime() + source.fetchFrequency * 3600000).toISOString(),
+                    nextFetchTime(source, fetchedAt),
                     source.id
                 ]
             );

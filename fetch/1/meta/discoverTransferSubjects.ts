@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import type { FetchResult } from "../fetchers/types.ts";
+import { fetchConfig } from "../../config.ts";
 
 const WS_BASE_URL = "https://api.bctransferguide.ca";
 
@@ -35,7 +36,7 @@ export async function runDiscoverTransferSubjects(db: Database): Promise<FetchRe
         if (!existing) {
             db.run(
                 `INSERT INTO Source (sourceType, sourceIdentifier, fetchFrequency, nextFetch, isActive) VALUES ('TransferCredits', ?, ?, ?, 1)`,
-                [identifier, 24 * 7, new Date().toISOString()]
+                [identifier, fetchConfig.frequencies.TransferCredits, new Date().toISOString()]
             );
             newSources++;
             console.log(`[DiscoverTransferSubjects] New source: ${subject.code}`);
