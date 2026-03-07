@@ -487,6 +487,73 @@ function getTransferDestinations(db: Database) {
     };
 }
 
+// ─── Status endpoint ──────────────────────────────────────────────────────────
+
+function getApiStatus(db: Database) {
+    // Determine overall status
+    let status: "ready" | "initializing" | "error" = "ready";
+    try {
+        const unfetchedCount = (db.query(
+            `SELECT COUNT(*) as n FROM Source WHERE isActive = 1 AND lastFetched IS NULL`
+        ).get() as any).n as number;
+        if (unfetchedCount > 0) status = "initializing";
+    } catch {
+        status = "error";
+    }
+
+    // Per-type source stats
+    const sourceStats = db.query(`
+        SELECT
+            sourceType,
+            COUNT(*)                                                                          AS total,
+            SUM(CASE WHEN isActive = 1 THEN 1 ELSE 0 END)                                   AS active,
+            SUM(CASE WHEN nextFetch <= datetime('now') AND isActive = 1 THEN 1 ELSE 0 END)   AS pending,
+            MAX(lastFetched)                                                                  AS last_fetched,
+            MIN(CASE WHEN isActive = 1 THEN nextFetch ELSE NULL END)                         AS next_fetch
+        FROM Source
+        GROUP BY sourceType
+        ORDER BY sourceType
+    `).all() as Array<{
+        sourceType: string; total: number; active: number; pending: number;
+        last_fetched: string | null; next_fetch: string | null;
+    }>;
+
+    // Latest / earliest semester available
+    const latestSemester  = db.query(`SELECT year, term FROM CourseSummary ORDER BY year DESC, term DESC LIMIT 1`).get() as { year: number; term: number } | null;
+    const earliestSemester = db.query(`SELECT year, term FROM CourseSummary ORDER BY year ASC,  term ASC  LIMIT 1`).get() as { year: number; term: number } | null;
+
+    // Row counts
+    const counts = db.query(`
+        SELECT
+            (SELECT COUNT(*) FROM Course)           AS courses,
+            (SELECT COUNT(*) FROM Section)          AS sections,
+            (SELECT COUNT(*) FROM Transfer)         AS transfers,
+            (SELECT COUNT(*) FROM LangaraCourseDetail) AS langara_pages,
+            (SELECT COUNT(DISTINCT year || term) FROM CourseSummary) AS semesters
+    `).get() as { courses: number; sections: number; transfers: number; langara_pages: number; semesters: number };
+
+    return {
+        status,
+        database: {
+            courses:       counts.courses,
+            sections:      counts.sections,
+            transfers:     counts.transfers,
+            langara_pages: counts.langara_pages,
+            semesters:     counts.semesters,
+        },
+        latest_semester:   latestSemester,
+        earliest_semester: earliestSemester,
+        sources: sourceStats.map(s => ({
+            type:         s.sourceType,
+            total:        s.total,
+            active:       s.active,
+            pending:      s.pending,
+            last_fetched: s.last_fetched,
+            next_fetch:   s.next_fetch,
+        })),
+    };
+}
+
 export function createPublicApi(db: Database) {
     return new Elysia( { strictPath: true } )
         .use(openapi({
@@ -521,6 +588,9 @@ export function createPublicApi(db: Database) {
                 database: t.String(),
                 version: t.String(),
             })
+        })
+        .get("api/v3/status", () => getApiStatus(db), {
+            detail: { tags: ["Health"], summary: "API and data status" },
         })
         .get("api/v3/index/latest_semester", () => getLatestSemester(db), {
             detail: { tags: ["Index"], summary: "Latest semester" },
