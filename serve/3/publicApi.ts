@@ -96,10 +96,11 @@ function shapeCourseRow(row: any) {
 
 /** Aggregate flat Section + ScheduleEntry rows into nested SectionAPI objects */
 function shapeSections(sections: any[], scheduleRows: any[]) {
-    const scheduleBycrn = new Map<number, any[]>();
+    const scheduleByKey = new Map<string, any[]>();
     for (const se of scheduleRows) {
-        if (!scheduleBycrn.has(se.crn)) scheduleBycrn.set(se.crn, []);
-        scheduleBycrn.get(se.crn)!.push({
+        const key = `${se.crn}-${se.year}-${se.term}`;
+        if (!scheduleByKey.has(key)) scheduleByKey.set(key, []);
+        scheduleByKey.get(key)!.push({
             type:       se.type,
             days:       se.days,
             time:       se.time,
@@ -124,7 +125,7 @@ function shapeSections(sections: any[], scheduleRows: any[]) {
         add_fees:          s.addFees,
         rpt_limit:         s.rptLimit,
         notes:             s.notes,
-        schedule:          scheduleBycrn.get(s.crn) ?? [],
+        schedule:          scheduleByKey.get(`${s.crn}-${s.year}-${s.term}`) ?? [],
     }));
 }
 
@@ -143,8 +144,12 @@ function getCourse(db: Database, subject: string, courseCode: string) {
 
     const crns = sectionRows.map(s => s.crn);
     const scheduleRows = crns.length
-        ? db.query(`SELECT * FROM ScheduleEntry WHERE crn IN (${crns.map(() => '?').join(',')}) ORDER BY crn, scheduleIndex`)
-              .all(...crns) as any[]
+        ? db.query(`
+            SELECT se.* FROM ScheduleEntry se
+            INNER JOIN Section s ON s.crn = se.crn AND s.year = se.year AND s.term = se.term
+            WHERE s.subject = ? AND s.courseCode = ?
+            ORDER BY se.crn, se.year, se.term, se.scheduleIndex
+          `).all(subject.toUpperCase(), courseCode) as any[]
         : [];
 
     const transfers = db.query(`
@@ -321,8 +326,12 @@ function searchSectionsAdvanced(db: Database, params: {
 
     const crns = sections.map(s => s.crn);
     const scheduleRows = crns.length
-        ? db.query(`SELECT * FROM ScheduleEntry WHERE crn IN (${crns.map(() => '?').join(',')}) ORDER BY crn, scheduleIndex`)
-              .all(...crns) as any[]
+        ? db.query(`
+            SELECT se.* FROM ScheduleEntry se
+            INNER JOIN Section s ON s.crn = se.crn AND s.year = se.year AND s.term = se.term
+            WHERE se.crn IN (${crns.map(() => '?').join(',')})
+            ORDER BY se.crn, se.year, se.term, se.scheduleIndex
+          `).all(...crns) as any[]
         : [];
 
     return {
@@ -418,9 +427,12 @@ function searchCourses(db: Database, params: {
     if (params.offered_online === true) {
         conditions.push(`EXISTS (
             SELECT 1 FROM Section s
-            INNER JOIN ScheduleEntry se ON se.crn = s.crn AND se.year = s.year AND se.term = s.term
             WHERE s.subject = subject AND s.courseCode = courseCode
-            AND (se.type = 'WWW' OR se.room = 'WWW')
+            AND s.section LIKE 'W%'
+            AND (s.year * 100 + s.term) IN (
+                SELECT DISTINCT year * 100 + term FROM Section
+                ORDER BY year * 100 + term DESC LIMIT 6
+            )
         )`);
     }
     const attrMap: [keyof typeof params, string][] = [
@@ -446,6 +458,10 @@ function searchCourses(db: Database, params: {
                 SELECT 1 FROM Section s
                 WHERE s.subject = c.subject AND s.courseCode = c.courseCode
                 AND s.section LIKE 'W%'
+                AND (s.year * 100 + s.term) IN (
+                    SELECT DISTINCT year * 100 + term FROM Section
+                    ORDER BY year * 100 + term DESC LIMIT 6
+                )
             ) AS offeredOnline,
             (SELECT s.year FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year ASC,  s.term ASC  LIMIT 1) AS firstOfferedYear,
             (SELECT s.term FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year ASC,  s.term ASC  LIMIT 1) AS firstOfferedTerm,
