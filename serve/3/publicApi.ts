@@ -262,10 +262,14 @@ function searchSectionsAdvanced(db: Database, params: {
     attr_lsc?: boolean; attr_sci?: boolean; attr_soc?: boolean; attr_ut?: boolean;
     filter_open_seats?: boolean; filter_no_waitlist?: boolean; filter_not_cancelled?: boolean;
     page?: number; sections_per_page?: number;
+    sort?: 'newest' | 'oldest' | 'course';
 }) {
     const page             = Math.max(1, params.page             ?? 1);
     const sections_per_page = Math.min(200, Math.max(1, params.sections_per_page ?? 100));
     const offset           = (page - 1) * sections_per_page;
+    const orderBy = params.sort === 'newest' ? `s.year DESC, s.term DESC, s.subject ASC, s.courseCode ASC`
+                  : params.sort === 'oldest' ? `s.year ASC,  s.term ASC,  s.subject ASC, s.courseCode ASC`
+                  :                            `s.subject ASC, s.courseCode ASC, s.year DESC, s.term DESC`;
 
     const conditions: string[] = [];
     const args: any[] = [];
@@ -320,7 +324,7 @@ function searchSectionsAdvanced(db: Database, params: {
 
     const sections = db.query(`
         SELECT s.* FROM Section s ${attrJoin} ${where}
-        ORDER BY s.subject, s.courseCode, s.crn
+        ORDER BY ${orderBy}
         LIMIT ? OFFSET ?
     `).all(...args, sections_per_page, offset) as any[];
 
@@ -764,6 +768,7 @@ export function createPublicApi(db: Database) {
                 filter_not_cancelled: query.filter_not_cancelled === 'true',
                 page:                 query.page             ? Number(query.page)             : undefined,
                 sections_per_page:    query.sections_per_page ? Number(query.sections_per_page) : undefined,
+                sort:                 (query.sort as 'newest' | 'oldest' | 'course' | undefined),
             });
         }, {
             detail: { tags: ["Search"], summary: "Advanced section search with attribute filters (paginated)" },
@@ -787,6 +792,7 @@ export function createPublicApi(db: Database) {
                 filter_not_cancelled: t.Optional(t.String()),
                 page:                 t.Optional(t.String()),
                 sections_per_page:    t.Optional(t.String()),
+                sort:                 t.Optional(t.String()),
             }),
         })
         .get("api/v3/search/courses/simple", ({ query }) => {
