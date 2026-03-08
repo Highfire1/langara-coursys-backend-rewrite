@@ -5,8 +5,17 @@ import { createPrivateApi } from "./privateApi.ts";
 
 const db = new Database("./../data/database.sqlite");
 
-// Ensure indexes exist for optimal query performance
-db.run(`CREATE INDEX IF NOT EXISTS idx_section_course_online ON Section(subject, courseCode, section, year, term)`);
+// Create indexes in background to avoid blocking startup
+setTimeout(() => {
+    try {
+        db.run(`CREATE INDEX IF NOT EXISTS idx_section_course_online ON Section(subject, courseCode, section, year, term)`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_section_course_semester ON Section(subject, courseCode, year, term)`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_transfer_course ON Transfer(subject, courseNumber)`);
+        console.log("Indexes ready");
+    } catch (e) {
+        console.error("Failed to create indexes:", e);
+    }
+}, 0);
 
 const PORT = 3000;
 

@@ -434,89 +434,116 @@ function searchCourses(db: Database, params: {
     const offset = (page - 1) * limit;
 
     // Pre-compute recent semesters ONCE if needed
-    const recentSemesters = params.offered_online === true ? getLastNSemesters(db, 6) : [];
-    const semPlaceholders = recentSemesters.length ? recentSemesters.map(() => '?').join(',') : '';
+    const recentSemesters = getLastNSemesters(db, 6);
+    const semPlaceholders = recentSemesters.map(() => '?').join(',');
 
+    // Step 1: Build filtered course list using INNER JOIN for offered_online
     const conditions: string[] = [];
     const args: any[] = [];
 
-    if (params.subject)      { conditions.push(`subject = ?`);    args.push(params.subject.toUpperCase()); }
-    if (params.course_code)  { conditions.push(`courseCode = ?`); args.push(params.course_code); }
+    if (params.subject)      { conditions.push(`c.subject = ?`);    args.push(params.subject.toUpperCase()); }
+    if (params.course_code)  { conditions.push(`c.courseCode = ?`); args.push(params.course_code); }
     if (params.title_search) {
-        conditions.push(`title LIKE ?`);
+        conditions.push(`c.title LIKE ?`);
         args.push(`%${params.title_search}%`);
     }
     if (params.query) {
         const q = `%${params.query}%`;
-        conditions.push(`(subject LIKE ? OR courseCode LIKE ? OR title LIKE ? OR description LIKE ?)`);
+        conditions.push(`(c.subject LIKE ? OR c.courseCode LIKE ? OR c.title LIKE ? OR c.description LIKE ?)`);
         args.push(q, q, q, q);
     }
-    if (params.credits != null)          { conditions.push(`credits = ?`);            args.push(params.credits); }
-    if (params.on_langara_website === true) { conditions.push(`onLangaraWebsite = 1`); }
-    if (params.prerequisites === true)   { conditions.push(`(descPrerequisites IS NOT NULL AND descPrerequisites != '') OR (descRequisitesCatalogue IS NOT NULL AND descRequisitesCatalogue != '')`); }
-    if (params.offered_online === true && recentSemesters.length > 0) {
-        conditions.push(`EXISTS (
-            SELECT 1 FROM Section s
-            WHERE s.subject = subject AND s.courseCode = courseCode
-            AND s.section LIKE 'W%'
-            AND (s.year * 100 + s.term) IN (${semPlaceholders})
-        )`);
-        args.push(...recentSemesters);
-    }
+    if (params.credits != null)          { conditions.push(`c.credits = ?`);            args.push(params.credits); }
+    if (params.on_langara_website === true) { conditions.push(`c.onLangaraWebsite = 1`); }
+    if (params.prerequisites === true)   { conditions.push(`(c.descPrerequisites IS NOT NULL AND c.descPrerequisites != '') OR (c.descRequisitesCatalogue IS NOT NULL AND c.descRequisitesCatalogue != '')`); }
+    
     const attrMap: [keyof typeof params, string][] = [
         ['attr_2ar', 'attr2AR'], ['attr_2sc', 'attr2SC'], ['attr_hum', 'attrHUM'],
         ['attr_lsc', 'attrLSC'], ['attr_sci', 'attrSCI'], ['attr_soc', 'attrSOC'],
         ['attr_ut',  'attrUT'],
     ];
     for (const [param, col] of attrMap) {
-        if (params[param] === true) { conditions.push(`${col} = 1`); }
+        if (params[param] === true) { conditions.push(`c.${col} = 1`); }
     }
     if (params.transfer_destinations && params.transfer_destinations.length > 0) {
         for (const dest of params.transfer_destinations) {
-            conditions.push(`EXISTS (SELECT 1 FROM Transfer t WHERE t.subject = subject AND t.courseNumber = courseCode AND t.destination = ?)`);
+            conditions.push(`EXISTS (SELECT 1 FROM Transfer t WHERE t.subject = c.subject AND t.courseNumber = c.courseCode AND t.destination = ?)`);
             args.push(dest.toUpperCase());
         }
     }
 
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const total = (db.query(`SELECT COUNT(*) as n FROM Course ${where}`).get(...args) as any).n as number;
+    // Use INNER JOIN for offered_online filter (much faster than subquery in WHERE)
+    const onlineJoin = params.offered_online === true
+        ? `INNER JOIN (
+            SELECT DISTINCT subject, courseCode
+            FROM Section
+            WHERE section LIKE 'W%' AND (year * 100 + term) IN (${semPlaceholders})
+        ) online_filter ON online_filter.subject = c.subject AND online_filter.courseCode = c.courseCode`
+        : '';
 
-    // Build offeredOnline subquery with pre-computed semesters
-    const offeredOnlineSubquery = recentSemesters.length > 0
-        ? `EXISTS (
+    const onlineArgs = params.offered_online === true ? [...recentSemesters] : [];
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Count query (fast - just counts filtered courses)
+    const countArgs = [...onlineArgs, ...args];
+    const total = (db.query(`
+        SELECT COUNT(*) as n FROM Course c
+        ${onlineJoin}
+        ${where}
+    `).get(...countArgs) as any).n as number;
+
+    // Step 2: Get paginated course IDs first
+    const courseIdArgs = [...onlineArgs, ...args, limit, offset];
+    const courseIds = db.query(`
+        SELECT c.subject, c.courseCode FROM Course c
+        ${onlineJoin}
+        ${where}
+        ORDER BY c.subject, c.courseCode
+        LIMIT ? OFFSET ?
+    `).all(...courseIdArgs) as Array<{ subject: string; courseCode: string }>;
+
+    if (courseIds.length === 0) {
+        return { page, limit, total_count: total, total_pages: Math.ceil(total / limit), courses: [] };
+    }
+
+    // Step 3: Build IN clause for the filtered courses
+    const courseKeys = courseIds.map(c => `${c.subject}|${c.courseCode}`);
+    const coursePlaceholders = courseIds.map(() => '(?, ?)').join(',');
+    const courseArgs = courseIds.flatMap(c => [c.subject, c.courseCode]);
+
+    // Step 4: Get full course data with aggregates for ONLY the filtered courses
+    const rows = db.query(`
+        SELECT c.*,
+            EXISTS (
                 SELECT 1 FROM Section s
                 WHERE s.subject = c.subject AND s.courseCode = c.courseCode
                 AND s.section LIKE 'W%'
                 AND (s.year * 100 + s.term) IN (${semPlaceholders})
-            )`
-        : `EXISTS (
-                SELECT 1 FROM Section s
-                WHERE s.subject = c.subject AND s.courseCode = c.courseCode
-                AND s.section LIKE 'W%'
-                AND (s.year * 100 + s.term) IN (
-                    SELECT DISTINCT year * 100 + term FROM Section
-                    ORDER BY year * 100 + term DESC LIMIT 6
-                )
-            )`;
-
-    // Build full query args: base args + semester placeholders for offeredOnline + limit/offset
-    const selectArgs = recentSemesters.length > 0
-        ? [...args, ...recentSemesters, limit, offset]
-        : [...args, limit, offset];
-
-    const rows  = db.query(`
-        SELECT c.*,
-            ${offeredOnlineSubquery} AS offeredOnline,
-            (SELECT s.year FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year ASC,  s.term ASC  LIMIT 1) AS firstOfferedYear,
-            (SELECT s.term FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year ASC,  s.term ASC  LIMIT 1) AS firstOfferedTerm,
-            (SELECT s.year FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year DESC, s.term DESC LIMIT 1) AS lastOfferedYear,
-            (SELECT s.term FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year DESC, s.term DESC LIMIT 1) AS lastOfferedTerm,
-            (SELECT GROUP_CONCAT(DISTINCT t.destination ORDER BY t.destination)
-             FROM Transfer t WHERE t.subject = c.subject AND t.courseNumber = c.courseCode) AS transferDestinations
-        FROM Course c ${where}
+            ) AS offeredOnline,
+            section_agg.firstYear AS firstOfferedYear,
+            section_agg.firstTerm AS firstOfferedTerm,
+            section_agg.lastYear AS lastOfferedYear,
+            section_agg.lastTerm AS lastOfferedTerm,
+            transfer_agg.destinations AS transferDestinations
+        FROM Course c
+        LEFT JOIN (
+            SELECT subject, courseCode,
+                   MIN(year * 100 + term) / 100 AS firstYear,
+                   MIN(year * 100 + term) % 100 AS firstTerm,
+                   MAX(year * 100 + term) / 100 AS lastYear,
+                   MAX(year * 100 + term) % 100 AS lastTerm
+            FROM Section
+            WHERE (subject, courseCode) IN (${coursePlaceholders})
+            GROUP BY subject, courseCode
+        ) section_agg ON section_agg.subject = c.subject AND section_agg.courseCode = c.courseCode
+        LEFT JOIN (
+            SELECT subject, courseNumber, GROUP_CONCAT(DISTINCT destination) as destinations
+            FROM Transfer
+            WHERE (subject, courseNumber) IN (${coursePlaceholders})
+            GROUP BY subject, courseNumber
+        ) transfer_agg ON transfer_agg.subject = c.subject AND transfer_agg.courseNumber = c.courseCode
+        WHERE (c.subject, c.courseCode) IN (${coursePlaceholders})
         ORDER BY c.subject, c.courseCode
-        LIMIT ? OFFSET ?
-    `).all(...selectArgs) as any[];
+    `).all(...recentSemesters, ...courseArgs, ...courseArgs, ...courseArgs) as any[];
 
     return {
         page, limit,
