@@ -217,16 +217,26 @@ function searchSections(db: Database, params: {
     if (params.year)  { conditions.push(`s.year = ?`);  args.push(params.year); }
     if (params.term)  { conditions.push(`s.term = ?`);  args.push(params.term); }
     if (params.query) {
-        const q = `%${params.query}%`;
-        conditions.push(`(
-            s.subject LIKE ? OR s.courseCode LIKE ? OR s.abbreviatedTitle LIKE ?
-            OR EXISTS (
-                SELECT 1 FROM ScheduleEntry se
-                WHERE se.crn = s.crn AND se.year = s.year AND se.term = s.term
-                AND se.instructor LIKE ?
-            )
-        )`);
-        args.push(q, q, q, q);
+        const raw = params.query.trim();
+        // Detect "SUBJECT code" pattern — with or without space e.g. "cpsc 1150", "cpsc1", "CPSC 11"
+        const subjectCodeMatch = raw.match(/^([a-zA-Z]+)\s*(\d\S*)$/);
+        if (subjectCodeMatch) {
+            const subj = subjectCodeMatch[1].toUpperCase();
+            const code = `${subjectCodeMatch[2]}%`;
+            conditions.push(`(s.subject = ? AND s.courseCode LIKE ?)`);
+            args.push(subj, code);
+        } else {
+            const q = `%${raw}%`;
+            conditions.push(`(
+                s.subject LIKE ? OR s.courseCode LIKE ? OR s.abbreviatedTitle LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM ScheduleEntry se
+                    WHERE se.crn = s.crn AND se.year = s.year AND se.term = s.term
+                    AND se.instructor LIKE ?
+                )
+            )`);
+            args.push(q, q, q, q);
+        }
     }
     if (params.online === true) {
         conditions.push(`EXISTS (
