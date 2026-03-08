@@ -406,6 +406,17 @@ function searchCoursesSimple(db: Database, params: {
     };
 }
 
+// Pre-compute last 6 semesters (cached per request context)
+function getLastNSemesters(db: Database, n = 6): number[] {
+    const rows = db.query(`
+        SELECT DISTINCT year * 100 + term AS semKey
+        FROM Section
+        ORDER BY semKey DESC
+        LIMIT ?
+    `).all(n) as Array<{ semKey: number }>;
+    return rows.map(r => r.semKey);
+}
+
 // Full course search — paginated with rich filters (matches /v2/search/courses)
 function searchCourses(db: Database, params: {
     query?: string; title_search?: string; subject?: string; course_code?: string;
@@ -421,6 +432,10 @@ function searchCourses(db: Database, params: {
     const page   = Math.max(1, params.page  ?? 1);
     const limit  = Math.min(200, Math.max(1, params.limit ?? 20));
     const offset = (page - 1) * limit;
+
+    // Pre-compute recent semesters ONCE if needed
+    const recentSemesters = params.offered_online === true ? getLastNSemesters(db, 6) : [];
+    const semPlaceholders = recentSemesters.length ? recentSemesters.map(() => '?').join(',') : '';
 
     const conditions: string[] = [];
     const args: any[] = [];
@@ -439,16 +454,14 @@ function searchCourses(db: Database, params: {
     if (params.credits != null)          { conditions.push(`credits = ?`);            args.push(params.credits); }
     if (params.on_langara_website === true) { conditions.push(`onLangaraWebsite = 1`); }
     if (params.prerequisites === true)   { conditions.push(`(descPrerequisites IS NOT NULL AND descPrerequisites != '') OR (descRequisitesCatalogue IS NOT NULL AND descRequisitesCatalogue != '')`); }
-    if (params.offered_online === true) {
+    if (params.offered_online === true && recentSemesters.length > 0) {
         conditions.push(`EXISTS (
             SELECT 1 FROM Section s
             WHERE s.subject = subject AND s.courseCode = courseCode
             AND s.section LIKE 'W%'
-            AND (s.year * 100 + s.term) IN (
-                SELECT DISTINCT year * 100 + term FROM Section
-                ORDER BY year * 100 + term DESC LIMIT 6
-            )
+            AND (s.year * 100 + s.term) IN (${semPlaceholders})
         )`);
+        args.push(...recentSemesters);
     }
     const attrMap: [keyof typeof params, string][] = [
         ['attr_2ar', 'attr2AR'], ['attr_2sc', 'attr2SC'], ['attr_hum', 'attrHUM'],
@@ -467,9 +480,16 @@ function searchCourses(db: Database, params: {
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const total = (db.query(`SELECT COUNT(*) as n FROM Course ${where}`).get(...args) as any).n as number;
-    const rows  = db.query(`
-        SELECT c.*,
-            EXISTS (
+
+    // Build offeredOnline subquery with pre-computed semesters
+    const offeredOnlineSubquery = recentSemesters.length > 0
+        ? `EXISTS (
+                SELECT 1 FROM Section s
+                WHERE s.subject = c.subject AND s.courseCode = c.courseCode
+                AND s.section LIKE 'W%'
+                AND (s.year * 100 + s.term) IN (${semPlaceholders})
+            )`
+        : `EXISTS (
                 SELECT 1 FROM Section s
                 WHERE s.subject = c.subject AND s.courseCode = c.courseCode
                 AND s.section LIKE 'W%'
@@ -477,7 +497,16 @@ function searchCourses(db: Database, params: {
                     SELECT DISTINCT year * 100 + term FROM Section
                     ORDER BY year * 100 + term DESC LIMIT 6
                 )
-            ) AS offeredOnline,
+            )`;
+
+    // Build full query args: base args + semester placeholders for offeredOnline + limit/offset
+    const selectArgs = recentSemesters.length > 0
+        ? [...args, ...recentSemesters, limit, offset]
+        : [...args, limit, offset];
+
+    const rows  = db.query(`
+        SELECT c.*,
+            ${offeredOnlineSubquery} AS offeredOnline,
             (SELECT s.year FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year ASC,  s.term ASC  LIMIT 1) AS firstOfferedYear,
             (SELECT s.term FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year ASC,  s.term ASC  LIMIT 1) AS firstOfferedTerm,
             (SELECT s.year FROM Section s WHERE s.subject = c.subject AND s.courseCode = c.courseCode ORDER BY s.year DESC, s.term DESC LIMIT 1) AS lastOfferedYear,
@@ -487,7 +516,7 @@ function searchCourses(db: Database, params: {
         FROM Course c ${where}
         ORDER BY c.subject, c.courseCode
         LIMIT ? OFFSET ?
-    `).all(...args, limit, offset) as any[];
+    `).all(...selectArgs) as any[];
 
     return {
         page, limit,

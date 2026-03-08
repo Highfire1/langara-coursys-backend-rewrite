@@ -4,6 +4,10 @@ import { createPublicApi } from "./publicApi.ts";
 import { createPrivateApi } from "./privateApi.ts";
 
 const db = new Database("./../data/database.sqlite");
+
+// Ensure indexes exist for optimal query performance
+db.run(`CREATE INDEX IF NOT EXISTS idx_section_course_online ON Section(subject, courseCode, section, year, term)`);
+
 const PORT = 3000;
 
 const app = new Elysia()

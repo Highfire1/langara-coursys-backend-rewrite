@@ -117,6 +117,8 @@ db.run(`
 db.run(`CREATE INDEX IF NOT EXISTS idx_section_subject ON Section(subject)`);
 db.run(`CREATE INDEX IF NOT EXISTS idx_section_year_term ON Section(year, term)`);
 db.run(`CREATE INDEX IF NOT EXISTS idx_section_crn ON Section(crn)`);
+// Covering index for offered_online queries (subject + courseCode + section + year + term)
+db.run(`CREATE INDEX IF NOT EXISTS idx_section_course_online ON Section(subject, courseCode, section, year, term)`);
 
 // Create ScheduleEntry table for section schedules
 db.run(`
