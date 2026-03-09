@@ -47,7 +47,7 @@ function getAllSubjects(db: Database, all: boolean) {
 
 function getAllCourses(db: Database) {
     const rows = db.query(
-        `SELECT subject, courseCode, title, onLangaraWebsite FROM Course ORDER BY subject ASC, courseCode ASC`
+        `SELECT subject, courseCode, title, onLangaraWebsite FROM _CourseCache ORDER BY subject ASC, courseCode ASC`
     ).all() as Array<{ subject: string; courseCode: string; title: string | null; onLangaraWebsite: number }>;
 
     const subjects = new Set(rows.map(r => r.subject));
@@ -133,7 +133,7 @@ function shapeSections(sections: any[], scheduleRows: any[]) {
 
 function getCourse(db: Database, subject: string, courseCode: string) {
     const row = db.query(
-        `SELECT * FROM Course WHERE subject = ? AND courseCode = ?`
+        `SELECT * FROM _CourseCache WHERE subject = ? AND courseCode = ?`
     ).get(subject.toUpperCase(), courseCode) as any;
     if (!row) return null;
 
@@ -175,7 +175,7 @@ function getCourse(db: Database, subject: string, courseCode: string) {
 function getSemesterCourses(db: Database, year: number, term: number) {
     const rows = db.query(`
         SELECT DISTINCT c.*
-        FROM Course c
+        FROM _CourseCache c
         INNER JOIN Section s ON s.subject = c.subject AND s.courseCode = c.courseCode
         WHERE s.year = ? AND s.term = ?
         ORDER BY c.subject, c.courseCode
@@ -323,8 +323,10 @@ function searchSectionsAdvanced(db: Database, params: {
     for (const [param, col] of attrMap) {
         if (params[param] === true) attrFilters.push(`c.${col} = 1`);
     }
+    // Use the pre-materialized _CourseCache table instead of the expensive
+    // multi-CTE Course VIEW so attribute filtering is a simple indexed JOIN.
     const attrJoin = attrFilters.length
-        ? `INNER JOIN Course c ON c.subject = s.subject AND c.courseCode = s.courseCode AND ${attrFilters.join(' AND ')}`
+        ? `INNER JOIN _CourseCache c ON c.subject = s.subject AND c.courseCode = s.courseCode AND ${attrFilters.join(' AND ')}`
         : '';
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -339,15 +341,33 @@ function searchSectionsAdvanced(db: Database, params: {
         LIMIT ? OFFSET ?
     `).all(...args, sections_per_page, offset) as any[];
 
-    const crns = sections.map(s => s.crn);
-    const scheduleRows = crns.length
-        ? db.query(`
-            SELECT se.* FROM ScheduleEntry se
-            INNER JOIN Section s ON s.crn = se.crn AND s.year = se.year AND s.term = se.term
-            WHERE se.crn IN (${crns.map(() => '?').join(',')})
-            ORDER BY se.crn, se.year, se.term, se.scheduleIndex
-          `).all(...crns) as any[]
-        : [];
+    // Fetch schedule entries scoped to the exact (crn, year, term) tuples on this
+    // page — avoids pulling cross-semester duplicates when the same CRN repeats.
+    let scheduleRows: any[] = [];
+    if (sections.length > 0) {
+        const uniqueYearTerms = [...new Set(sections.map((s: any) => `${s.year}_${s.term}`))];
+        if (uniqueYearTerms.length === 1) {
+            // Common fast path: all sections on the page share the same semester.
+            const [year, term] = uniqueYearTerms[0].split('_').map(Number);
+            const crns = sections.map((s: any) => s.crn);
+            scheduleRows = db.query(`
+                SELECT se.* FROM ScheduleEntry se
+                WHERE se.year = ? AND se.term = ?
+                  AND se.crn IN (${crns.map(() => '?').join(',')})
+                ORDER BY se.crn, se.scheduleIndex
+            `).all(year, term, ...crns) as any[];
+        } else {
+            // Sections span multiple semesters — still restrict by crn to avoid a
+            // full table scan, but keep the Section JOIN for year+term validation.
+            const crns = [...new Set(sections.map((s: any) => s.crn))];
+            scheduleRows = db.query(`
+                SELECT se.* FROM ScheduleEntry se
+                INNER JOIN Section s ON s.crn = se.crn AND s.year = se.year AND s.term = se.term
+                WHERE se.crn IN (${crns.map(() => '?').join(',')})
+                ORDER BY se.crn, se.year, se.term, se.scheduleIndex
+            `).all(...crns) as any[];
+        }
+    }
 
     return {
         page, sections_per_page,
@@ -391,7 +411,7 @@ function searchCoursesSimple(db: Database, params: {
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const rows = db.query(`
-        SELECT subject, courseCode, title, onLangaraWebsite FROM Course ${where}
+        SELECT subject, courseCode, title, onLangaraWebsite FROM _CourseCache ${where}
         ORDER BY subject, courseCode
     `).all(...args) as any[];
 
@@ -486,7 +506,7 @@ function searchCourses(db: Database, params: {
     // Count query (fast - just counts filtered courses)
     const countArgs = [...onlineArgs, ...args];
     const total = (db.query(`
-        SELECT COUNT(*) as n FROM Course c
+        SELECT COUNT(*) as n FROM _CourseCache c
         ${onlineJoin}
         ${where}
     `).get(...countArgs) as any).n as number;
@@ -494,7 +514,7 @@ function searchCourses(db: Database, params: {
     // Step 2: Get paginated course IDs first
     const courseIdArgs = [...onlineArgs, ...args, limit, offset];
     const courseIds = db.query(`
-        SELECT c.subject, c.courseCode FROM Course c
+        SELECT c.subject, c.courseCode FROM _CourseCache c
         ${onlineJoin}
         ${where}
         ORDER BY c.subject, c.courseCode
@@ -524,7 +544,7 @@ function searchCourses(db: Database, params: {
             section_agg.lastYear AS lastOfferedYear,
             section_agg.lastTerm AS lastOfferedTerm,
             transfer_agg.destinations AS transferDestinations
-        FROM Course c
+        FROM _CourseCache c
         LEFT JOIN (
             SELECT subject, courseCode,
                    MIN(year * 100 + term) / 100 AS firstYear,
@@ -633,7 +653,7 @@ function getApiStatus(db: Database) {
     // Row counts
     const counts = db.query(`
         SELECT
-            (SELECT COUNT(*) FROM Course)           AS courses,
+            (SELECT COUNT(*) FROM _CourseCache)     AS courses,
             (SELECT COUNT(*) FROM Section)          AS sections,
             (SELECT COUNT(*) FROM Transfer)         AS transfers,
             (SELECT COUNT(*) FROM LangaraCourseDetail) AS langara_pages,
