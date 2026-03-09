@@ -238,18 +238,15 @@ function searchSections(db: Database, params: {
             args.push(q, q, q, q);
         }
     }
-    if (params.online === true) {
-        conditions.push(`EXISTS (
-            SELECT 1 FROM ScheduleEntry se
-            WHERE se.crn = s.crn AND se.year = s.year AND se.term = s.term
-            AND (se.type = 'WWW' OR se.room = 'WWW')
-        )`);
-    }
+    const onlineJoin = params.online === true
+        ? `INNER JOIN _OnlineSections _os ON _os.crn = s.crn AND _os.year = s.year AND _os.term = s.term`
+        : '';
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const rows = db.query(`
         SELECT DISTINCT s.year, s.term, s.crn, s.subject, s.courseCode,
                s.section, s.abbreviatedTitle, s.credits, s.seats, s.waitlist
         FROM Section s
+        ${onlineJoin}
         ${where}
         ORDER BY s.subject, s.courseCode, s.crn
     `).all(...args) as any[];
@@ -303,13 +300,9 @@ function searchSectionsAdvanced(db: Database, params: {
         )`);
         args.push(q);
     }
-    if (params.online === true) {
-        conditions.push(`EXISTS (
-            SELECT 1 FROM ScheduleEntry se
-            WHERE se.crn = s.crn AND se.year = s.year AND se.term = s.term
-            AND (se.type = 'WWW' OR se.room = 'WWW')
-        )`);
-    }
+    const onlineJoin = params.online === true
+        ? `INNER JOIN _OnlineSections _os ON _os.crn = s.crn AND _os.year = s.year AND _os.term = s.term`
+        : '';
     if (params.filter_open_seats)    { conditions.push(`(CAST(s.seats AS INTEGER) > 0)`); }
     if (params.filter_no_waitlist)   { conditions.push(`(s.waitlist IS NULL OR s.waitlist = '' OR CAST(s.waitlist AS INTEGER) = 0)`); }
     if (params.filter_not_cancelled) { conditions.push(`s.seats NOT LIKE 'Cancel%' AND s.seats NOT LIKE 'Inact%'`); }
@@ -332,11 +325,11 @@ function searchSectionsAdvanced(db: Database, params: {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const total = (db.query(`
-        SELECT COUNT(*) as n FROM Section s ${attrJoin} ${where}
+        SELECT COUNT(*) as n FROM Section s ${attrJoin} ${onlineJoin} ${where}
     `).get(...args) as any).n as number;
 
     const sections = db.query(`
-        SELECT s.* FROM Section s ${attrJoin} ${where}
+        SELECT s.* FROM Section s ${attrJoin} ${onlineJoin} ${where}
         ORDER BY ${orderBy}
         LIMIT ? OFFSET ?
     `).all(...args, sections_per_page, offset) as any[];
