@@ -20,38 +20,42 @@ setTimeout(() => {
 // Pre-materialized table of the full course record per (subject, courseCode).
 // Materializes the expensive multi-CTE Course VIEW once at startup so every filter,
 // JOIN, and count against course fields hits a real indexed table.
+
+// DDL runs unconditionally — the table must always exist before any request is served.
+db.run(`DROP TABLE IF EXISTS _CourseAttrCurrent`); // remove narrow attr-only table from previous deployments
+db.run(`
+    CREATE TABLE IF NOT EXISTS _CourseCache (
+        subject                 TEXT NOT NULL,
+        courseCode              TEXT NOT NULL,
+        title                   TEXT,
+        onLangaraWebsite        INTEGER NOT NULL DEFAULT 0,
+        studyType               TEXT,
+        credits                 REAL,
+        lectureHours            REAL,
+        seminarHours            REAL,
+        labHours                REAL,
+        description             TEXT,
+        descPrerequisites       TEXT,
+        descCorequisites        TEXT,
+        descDegreeRequirements  TEXT,
+        descRequisitesCatalogue TEXT,
+        descReplacementCourse   TEXT,
+        courseOutlineUrl        TEXT,
+        attr2AR  INTEGER NOT NULL DEFAULT 0,
+        attr2SC  INTEGER NOT NULL DEFAULT 0,
+        attrHUM  INTEGER NOT NULL DEFAULT 0,
+        attrLSC  INTEGER NOT NULL DEFAULT 0,
+        attrSCI  INTEGER NOT NULL DEFAULT 0,
+        attrSOC  INTEGER NOT NULL DEFAULT 0,
+        attrUT   INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (subject, courseCode)
+    )
+`);
+
 function rebuildCourseCache() {
+    // The INSERT is wrapped separately — the table always exists even if population fails
+    // (e.g., source tables empty on a fresh database or during initial fetch).
     try {
-        // Drop the old narrow attr-only table if it exists from a previous deployment.
-        db.run(`DROP TABLE IF EXISTS _CourseAttrCurrent`);
-        db.run(`
-            CREATE TABLE IF NOT EXISTS _CourseCache (
-                subject                 TEXT NOT NULL,
-                courseCode              TEXT NOT NULL,
-                title                   TEXT,
-                onLangaraWebsite        INTEGER NOT NULL DEFAULT 0,
-                studyType               TEXT,
-                credits                 REAL,
-                lectureHours            REAL,
-                seminarHours            REAL,
-                labHours                REAL,
-                description             TEXT,
-                descPrerequisites       TEXT,
-                descCorequisites        TEXT,
-                descDegreeRequirements  TEXT,
-                descRequisitesCatalogue TEXT,
-                descReplacementCourse   TEXT,
-                courseOutlineUrl        TEXT,
-                attr2AR  INTEGER NOT NULL DEFAULT 0,
-                attr2SC  INTEGER NOT NULL DEFAULT 0,
-                attrHUM  INTEGER NOT NULL DEFAULT 0,
-                attrLSC  INTEGER NOT NULL DEFAULT 0,
-                attrSCI  INTEGER NOT NULL DEFAULT 0,
-                attrSOC  INTEGER NOT NULL DEFAULT 0,
-                attrUT   INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (subject, courseCode)
-            )
-        `);
         db.run(`
             INSERT OR REPLACE INTO _CourseCache
                 (subject, courseCode, title, onLangaraWebsite, studyType, credits,

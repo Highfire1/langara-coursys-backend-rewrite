@@ -2,28 +2,51 @@ import { spawn } from "bun";
 
 const processes: ReturnType<typeof spawn>[] = [];
 
+function prefixLines(stream: ReadableStream<Uint8Array>, prefix: string, dest: NodeJS.WriteStream) {
+    const decoder = new TextDecoder();
+    let buf = "";
+    const reader = stream.getReader();
+    (async () => {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+                if (buf) dest.write(`${prefix} ${buf}\n`);
+                break;
+            }
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split("\n");
+            buf = lines.pop()!;
+            for (const line of lines) dest.write(`${prefix} ${line}\n`);
+        }
+    })().catch(console.error);
+}
+
 async function startServer() {
-    console.log("Starting server on port 3000...");
+    console.log("[serve] Starting server on port 3000...");
     const server = spawn({
         cmd: ["bun", "run", "serve.ts"],
         cwd: import.meta.dir,
-        stdout: "inherit",
-        stderr: "inherit",
+        stdout: "pipe",
+        stderr: "pipe",
         stdin: "inherit",
     });
+    prefixLines(server.stdout, "[serve]", process.stdout);
+    prefixLines(server.stderr, "[serve]", process.stderr);
     processes.push(server);
     return server;
 }
 
 async function startFetch() {
-    console.log("Starting fetch service...");
+    console.log("[fetch] Starting fetch service...");
     const fetcher = spawn({
         cmd: ["bun", "run", "fetch.ts"],
         cwd: import.meta.dir,
-        stdout: "inherit",
-        stderr: "inherit",
+        stdout: "pipe",
+        stderr: "pipe",
         stdin: "inherit",
     });
+    prefixLines(fetcher.stdout, "[fetch]", process.stdout);
+    prefixLines(fetcher.stderr, "[fetch]", process.stderr);
     processes.push(fetcher);
     return fetcher;
 }
