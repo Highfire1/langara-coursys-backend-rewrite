@@ -293,6 +293,7 @@ function searchSectionsAdvanced(db: Database, params: {
         conditions.push(`EXISTS (
             SELECT 1 FROM ScheduleEntry se
             WHERE se.crn = s.crn AND se.year = s.year AND se.term = s.term
+            AND se.type != 'Exam'
             AND se.instructor LIKE ?
         )`);
         args.push(q);
