@@ -12,6 +12,8 @@ setTimeout(() => {
         db.run(`CREATE INDEX IF NOT EXISTS idx_section_course_online ON Section(subject, courseCode, section, year, term)`);
         db.run(`CREATE INDEX IF NOT EXISTS idx_section_course_semester ON Section(subject, courseCode, year, term)`);
         db.run(`CREATE INDEX IF NOT EXISTS idx_transfer_course ON Transfer(subject, courseNumber)`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_section_section ON Section(section)`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_schedule_crn_year_term_instructor ON ScheduleEntry(crn, year, term, instructor)`);
         console.log("Indexes ready");
     } catch (e) {
         console.error("Failed to create indexes:", e);
