@@ -18,11 +18,11 @@ function getLatestSemester(db: Database) {
 }
 
 /**
- * Returns the "current" semester using a time-based heuristic:
- *   Jan       → Fall of the previous year
- *   Feb–May   → Spring of the current year
- *   Jun–Sep   → Summer of the current year
- *   Oct–Dec   → Fall of the current year
+ * Returns the semester that registration is currently active for:
+ *   Jan       → Spring of the current year  (add/drop period)
+ *   Feb–May   → Summer of the current year  (registration open)
+ *   Jun–Sep   → Fall of the current year    (registration open / add/drop)
+ *   Oct–Dec   → Spring of the next year     (registration open)
  *
  * The computed target is then validated against the DB: we return the most
  * recent semester that is ≤ the target so we never return a semester with
@@ -37,17 +37,17 @@ function getCurrentSemester(db: Database) {
     let targetTerm: number;
 
     if (month === 1) {
-        targetYear = year - 1;
-        targetTerm = 30; // Fall of previous year
+        targetYear = year;
+        targetTerm = 10; // January: Spring add/drop is still open
     } else if (month <= 5) {
         targetYear = year;
-        targetTerm = 10; // Spring
+        targetTerm = 20; // February–May: Summer registration is open
     } else if (month <= 9) {
         targetYear = year;
-        targetTerm = 20; // Summer
+        targetTerm = 30; // June–September: Fall registration is open
     } else {
-        targetYear = year;
-        targetTerm = 30; // Fall
+        targetYear = year + 1;
+        targetTerm = 10; // October–December: Spring (next year) registration is open
     }
 
     // year*100+term is naturally chronological since terms are 10/20/30
@@ -787,12 +787,12 @@ export function createPublicApi(db: Database) {
         .get("api/v3/status", () => getApiStatus(db), {
             detail: { tags: ["Health"], summary: "API and data status" },
         })
-        .get("api/v3/index/current_semester", () => getCurrentSemester(db), {
+        .get("api/v3/index/registration_semester", () => getCurrentSemester(db), {
             detail: {
                 tags: ["Index"],
                 summary: "Current semester",
                 description:
-                    "Returns the semester currently in session. " +
+                    "Returns the semester that registration is currently active for. " +
                     "Vs `latest_semester`, which returns the most recent semester in the database " +
                     "and may return a future semester before it has begun.",
             },
