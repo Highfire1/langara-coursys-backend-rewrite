@@ -17,6 +17,52 @@ function getLatestSemester(db: Database) {
     return row || { term: 10, year: 2024 };
 }
 
+/**
+ * Returns the "current" semester using a time-based heuristic:
+ *   Jan       → Fall of the previous year
+ *   Feb–May   → Spring of the current year
+ *   Jun–Sep   → Summer of the current year
+ *   Oct–Dec   → Fall of the current year
+ *
+ * The computed target is then validated against the DB: we return the most
+ * recent semester that is ≤ the target so we never return a semester with
+ * no data.  Falls back to the computed target itself if the DB is empty.
+ */
+function getCurrentSemester(db: Database) {
+    const now = new Date();
+    const month = now.getMonth() + 1; // 1-indexed
+    const year  = now.getFullYear();
+
+    let targetYear: number;
+    let targetTerm: number;
+
+    if (month === 1) {
+        targetYear = year - 1;
+        targetTerm = 30; // Fall of previous year
+    } else if (month <= 5) {
+        targetYear = year;
+        targetTerm = 10; // Spring
+    } else if (month <= 9) {
+        targetYear = year;
+        targetTerm = 20; // Summer
+    } else {
+        targetYear = year;
+        targetTerm = 30; // Fall
+    }
+
+    // year*100+term is naturally chronological since terms are 10/20/30
+    const row = db
+        .query(`
+            SELECT DISTINCT year, term FROM CourseSummary
+            WHERE year * 100 + term <= ?
+            ORDER BY year * 100 + term DESC
+            LIMIT 1
+        `)
+        .get(targetYear * 100 + targetTerm) as { year: number; term: number } | undefined;
+
+    return row ?? { year: targetYear, term: targetTerm };
+}
+
 function getAllSemesters(db: Database) {
     const rows = db
         .query(`SELECT DISTINCT year, term FROM CourseSummary ORDER BY year DESC, term DESC`)
@@ -741,8 +787,22 @@ export function createPublicApi(db: Database) {
         .get("api/v3/status", () => getApiStatus(db), {
             detail: { tags: ["Health"], summary: "API and data status" },
         })
+        .get("api/v3/index/current_semester", () => getCurrentSemester(db), {
+            detail: {
+                tags: ["Index"],
+                summary: "Current semester",
+                description:
+                    "Returns the semester currently in session. " +
+                    "Vs `latest_semester`, which returns the most recent semester in the database " +
+                    "and may return a future semester before it has begun.",
+            },
+            response: t.Object({
+                term: t.Number(),
+                year: t.Number(),
+            })
+        })
         .get("api/v3/index/latest_semester", () => getLatestSemester(db), {
-            detail: { tags: ["Index"], summary: "Latest semester" },
+            detail: { tags: ["Index"], summary: "Latest semester that has course data"},
             response: t.Object({
                 term: t.Number(),
                 year: t.Number(),
