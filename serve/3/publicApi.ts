@@ -652,6 +652,27 @@ function getTransferDestinations(db: Database) {
 
 // ─── Status endpoint ──────────────────────────────────────────────────────────
 
+function formatRelativeFuture(dateIso: string | null): string | null {
+    if (!dateIso) return null;
+
+    const date = new Date(dateIso);
+    if (Number.isNaN(date.getTime())) return null;
+
+    const diffMs = date.getTime() - Date.now();
+    if (diffMs <= 0) return "due now";
+
+    const diffSecs = Math.floor(diffMs / 1000);
+    const diffMins = Math.floor(diffSecs / 60);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffSecs < 60) return `in ${diffSecs}s`;
+    if (diffMins < 60) return `in ${diffMins}m`;
+    if (diffHours < 24) return `in ${diffHours}h`;
+    if (diffDays < 7) return `in ${diffDays}d`;
+    return date.toLocaleDateString();
+}
+
 function getApiStatus(db: Database) {
     // Determine overall status
     let status: "ready" | "initializing" | "error" = "ready";
@@ -713,6 +734,7 @@ function getApiStatus(db: Database) {
             pending:      s.pending,
             last_fetched: s.last_fetched,
             next_fetch:   s.next_fetch,
+            next_fetch_in: formatRelativeFuture(s.next_fetch),
         })),
     };
 }
