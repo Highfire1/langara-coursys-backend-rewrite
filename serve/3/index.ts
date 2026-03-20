@@ -2,10 +2,10 @@ import { Database } from "bun:sqlite";
 import { Elysia } from "elysia";
 import { createPublicApi } from "./publicApi.ts";
 import { createPrivateApi } from "./privateApi.ts";
+import { applySQLitePragmas } from "../../sqlite.ts";
 
 const db = new Database("./../data/database.sqlite");
-db.run("PRAGMA busy_timeout = 5000");
-db.run("PRAGMA journal_mode = WAL");
+applySQLitePragmas(db);
 
 // Create indexes in background to avoid blocking startup
 setTimeout(() => {

@@ -1,10 +1,10 @@
 import Database from "bun:sqlite";
 import { mkdirSync } from "fs";
+import { applySQLitePragmas } from "../sqlite.ts";
 
 mkdirSync("./data", { recursive: true });
 const db = new Database("./data/database.sqlite", { create: true });
-db.run("PRAGMA busy_timeout = 5000");
-db.run("PRAGMA journal_mode = WAL");
+applySQLitePragmas(db);
 
 
 console.log("Step 1: Initializing database and sources...");

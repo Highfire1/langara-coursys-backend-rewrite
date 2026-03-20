@@ -3,10 +3,10 @@ import { createPublicApi } from "./3/publicApi.ts";
 import { createPrivateApi } from "./3/privateApi.ts";
 import { handleFrontend } from "./4/index.ts";
 import path from "path";
+import { applySQLitePragmas } from "../sqlite.ts";
 
 const db = new Database("./data/database.sqlite");
-db.run("PRAGMA busy_timeout = 5000");
-db.run("PRAGMA journal_mode = WAL");
+applySQLitePragmas(db);
 
 // ── Indexes ───────────────────────────────────────────────────────────────────
 setTimeout(() => {

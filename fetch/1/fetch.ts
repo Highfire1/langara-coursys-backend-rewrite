@@ -13,6 +13,7 @@ import {
 } from "./fetchers/index.ts";
 import { runDiscoverSemesters, runDiscoverTransferSubjects, runDiscoverLangaraCourses } from "./meta/index.ts";
 import { fetchConfig, type SourceTypeName } from "../config.ts";
+import { applySQLitePragmas } from "../../sqlite.ts";
 
 const META_SOURCE_TYPES = new Set(['DiscoverSemesters', 'DiscoverTransferSubjects', 'DiscoverLangaraCourses']);
 
@@ -33,8 +34,7 @@ function nextFetchTime(source: Source, fetchedAt: Date): string {
 }
 
 const db = new Database("./data/database.sqlite");
-db.run("PRAGMA busy_timeout = 5000");
-db.run("PRAGMA journal_mode = WAL");
+applySQLitePragmas(db);
 
 // Create SourceFetched table
 db.run(`

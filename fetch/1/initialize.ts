@@ -1,9 +1,9 @@
 import { Database } from "bun:sqlite";
 import { fetchConfig } from "../config.ts";
+import { applySQLitePragmas } from "../../sqlite.ts";
 
 const db = new Database("./data/database.sqlite");
-db.run("PRAGMA busy_timeout = 5000");
-db.run("PRAGMA journal_mode = WAL");
+applySQLitePragmas(db);
 
 // Create the Source table
 db.run(`

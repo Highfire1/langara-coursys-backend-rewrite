@@ -3,6 +3,7 @@
 import { Database } from "bun:sqlite";
 import { Source, SourceFetched } from "../../types.ts";
 import { readFile } from "fs/promises";
+import { applySQLitePragmas } from "../../sqlite.ts";
 import {
     parseSemesterSearch,
     parseSemesterCatalogue,
@@ -12,8 +13,7 @@ import {
 } from "./parsers/index.ts";
 
 const db = new Database("./data/database.sqlite");
-db.run("PRAGMA busy_timeout = 5000");
-db.run("PRAGMA journal_mode = WAL");
+applySQLitePragmas(db);
 
 function isSqliteBusyError(error: unknown): boolean {
     const e = error as { code?: string; message?: string };
