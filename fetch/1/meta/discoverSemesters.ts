@@ -54,6 +54,10 @@ function ensureSource(db: Database, sourceType: string, identifier: string, fetc
         );
         return true;
     }
+    db.run(
+        `UPDATE Source SET fetchFrequency = ? WHERE sourceType = ? AND sourceIdentifier = ?`,
+        [fetchFrequency, sourceType, identifier]
+    );
     return false;
 }
 

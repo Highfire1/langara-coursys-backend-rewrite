@@ -43,6 +43,11 @@ for (const task of metaTasks) {
             [task.sourceType, task.sourceIdentifier, task.fetchFrequency, new Date().toISOString()]
         );
         console.log(`[Initialize] Seeded meta task: ${task.sourceType}`);
+    } else {
+        db.run(
+            `UPDATE Source SET fetchFrequency = ? WHERE sourceType = ? AND sourceIdentifier = ?`,
+            [task.fetchFrequency, task.sourceType, task.sourceIdentifier]
+        );
     }
 }
 

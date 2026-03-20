@@ -40,6 +40,11 @@ export async function runDiscoverTransferSubjects(db: Database): Promise<FetchRe
             );
             newSources++;
             console.log(`[DiscoverTransferSubjects] New source: ${subject.code}`);
+        } else {
+            db.run(
+                `UPDATE Source SET fetchFrequency = ? WHERE sourceType = 'TransferCredits' AND sourceIdentifier = ?`,
+                [fetchConfig.frequencies.TransferCredits, identifier]
+            );
         }
     }
 

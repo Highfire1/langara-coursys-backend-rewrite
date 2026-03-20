@@ -52,6 +52,10 @@ function ensureCourseSource(db: Database, slug: string): boolean {
         );
         return true;
     }
+    db.run(
+        `UPDATE Source SET fetchFrequency = ? WHERE sourceType = 'LangaraCoursePage' AND sourceIdentifier = ?`,
+        [fetchConfig.frequencies.LangaraCoursePage, slug]
+    );
     return false;
 }
 
