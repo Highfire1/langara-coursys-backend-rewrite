@@ -33,6 +33,8 @@ function nextFetchTime(source: Source, fetchedAt: Date): string {
 }
 
 const db = new Database("./data/database.sqlite");
+db.run("PRAGMA busy_timeout = 5000");
+db.run("PRAGMA journal_mode = WAL");
 
 // Create SourceFetched table
 db.run(`

@@ -12,6 +12,13 @@ import {
 } from "./parsers/index.ts";
 
 const db = new Database("./data/database.sqlite");
+db.run("PRAGMA busy_timeout = 5000");
+db.run("PRAGMA journal_mode = WAL");
+
+function isSqliteBusyError(error: unknown): boolean {
+    const e = error as { code?: string; message?: string };
+    return e?.code === "SQLITE_BUSY" || e?.message?.includes("database is locked") === true;
+}
 
 // Create Transfer table for parsed transfer credit data
 db.run(`
@@ -308,18 +315,33 @@ function getUnparsedRecords(): (SourceFetched & { sourceType: Source['sourceType
 // Main loop to process unparsed records
 async function main() {
     console.log("Service 3: Parser starting...");
+    let consecutiveBusyErrors = 0;
     
     while (true) {
-        const unparsedRecords = getUnparsedRecords();
-        
-        if (unparsedRecords.length > 0) {
-            console.log(`Found ${unparsedRecords.length} unparsed records`);
-            
-            for (const record of unparsedRecords) {
-                await processSourceFetched(record);
+        try {
+            const unparsedRecords = getUnparsedRecords();
+            consecutiveBusyErrors = 0;
+
+            if (unparsedRecords.length > 0) {
+                console.log(`Found ${unparsedRecords.length} unparsed records`);
+
+                for (const record of unparsedRecords) {
+                    await processSourceFetched(record);
+                }
+            } else {
+                console.log("No unparsed records. Checking again in 30 seconds.");
             }
-        } else {
-            console.log("No unparsed records. Checking again in 30 seconds.");
+        } catch (error) {
+            if (isSqliteBusyError(error)) {
+                consecutiveBusyErrors += 1;
+                const busyBackoffMs = Math.min(1000 * Math.pow(2, consecutiveBusyErrors), 30000);
+                console.warn(`[Parser] SQLite busy/locked; retrying in ${busyBackoffMs}ms (attempt ${consecutiveBusyErrors}).`);
+                await new Promise(resolve => setTimeout(resolve, busyBackoffMs));
+                continue;
+            }
+
+            console.error("[Parser] Unexpected main loop error:", error);
+            await new Promise(resolve => setTimeout(resolve, 30000));
         }
         
         // Wait before checking again

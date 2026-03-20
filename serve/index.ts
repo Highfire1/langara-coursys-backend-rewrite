@@ -5,6 +5,8 @@ import { handleFrontend } from "./4/index.ts";
 import path from "path";
 
 const db = new Database("./data/database.sqlite");
+db.run("PRAGMA busy_timeout = 5000");
+db.run("PRAGMA journal_mode = WAL");
 
 // ── Indexes ───────────────────────────────────────────────────────────────────
 setTimeout(() => {
