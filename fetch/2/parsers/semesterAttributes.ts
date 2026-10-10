@@ -53,6 +53,18 @@ export async function parseSemesterAttributes(content: string, sourceIdentifier:
         console.log(`  [SemesterAttributes] No attributes found for term ${sourceIdentifier}`);
         return;
     }
+
+    const existingAttributeCount = (db.query(
+        `SELECT COUNT(*) AS count FROM CourseAttribute WHERE year = ? AND term = ?`
+    ).get(year, term) as { count: number }).count;
+    const minimumAttributeCount = Math.max(1, Math.floor(existingAttributeCount * 0.5));
+    if (existingAttributeCount > 0 && attributes.length < minimumAttributeCount) {
+        console.warn(
+            `  [SemesterAttributes] Refusing suspiciously small parse for ${sourceIdentifier}: ` +
+            `${attributes.length} attributes found, ${existingAttributeCount} already stored`
+        );
+        return;
+    }
     
     // Prepare insert statement with REPLACE to handle re-parsing
     const insertStmt = db.prepare(`
@@ -80,6 +92,14 @@ export async function parseSemesterAttributes(content: string, sourceIdentifier:
                 attr.attrUT ? 1 : 0,
             );
         }
+
+        const courseKeys = attributes.map(() => '(?, ?)').join(', ');
+        db.run(
+            `DELETE FROM CourseAttribute
+             WHERE year = ? AND term = ?
+               AND (subject, courseCode) NOT IN (${courseKeys})`,
+                        [year, term, ...attributes.flatMap(attr => [attr.subject, attr.courseCode])],
+        );
     })();
     
     console.log(`  [SemesterAttributes] Parsed term ${year}-${term} - ${attributes.length} courses`);

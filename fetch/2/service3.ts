@@ -329,7 +329,7 @@ async function main() {
                     await processSourceFetched(record);
                 }
             } else {
-                console.log("No unparsed records. Checking again in 30 seconds.");
+                // console.log("No unparsed records. Checking again in 30 seconds.");
             }
         } catch (error) {
             if (isSqliteBusyError(error)) {

@@ -199,7 +199,7 @@ async function main() {
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
         } else {
-            console.log("No sources due for fetch. Checking again in 1 minute.");
+            // console.log("No sources due for fetch. Checking again in 1 minute.");
         }
         
         // Wait before checking again (e.g., 1 minute)

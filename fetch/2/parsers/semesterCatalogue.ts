@@ -112,6 +112,18 @@ export async function parseSemesterCatalogue(content: string, sourceIdentifier: 
         console.log(`  [SemesterCatalogue] No courses found for term ${sourceIdentifier}`);
         return;
     }
+
+    const existingCourseCount = (db.query(
+        `SELECT COUNT(*) AS count FROM CourseSummary WHERE year = ? AND term = ?`
+    ).get(year, term) as { count: number }).count;
+    const minimumCourseCount = Math.max(1, Math.floor(existingCourseCount * 0.5));
+    if (existingCourseCount > 0 && courses.length < minimumCourseCount) {
+        console.warn(
+            `  [SemesterCatalogue] Refusing suspiciously small parse for ${sourceIdentifier}: ` +
+            `${courses.length} courses found, ${existingCourseCount} already stored`
+        );
+        return;
+    }
     
     // Prepare insert statement
     const insertStmt = db.prepare(`
@@ -142,6 +154,14 @@ export async function parseSemesterCatalogue(content: string, sourceIdentifier: 
                 course.hoursLab,
             );
         }
+
+        const courseKeys = courses.map(() => '(?, ?)').join(', ');
+        db.run(
+            `DELETE FROM CourseSummary
+             WHERE year = ? AND term = ?
+               AND (subject, courseCode) NOT IN (${courseKeys})`,
+                        [year, term, ...courses.flatMap(course => [course.subject, course.courseCode])],
+        );
     })();
     
     console.log(`  [SemesterCatalogue] Parsed term ${year}-${term} - ${courses.length} courses`);

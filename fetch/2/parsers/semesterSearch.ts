@@ -294,6 +294,18 @@ export async function parseSemesterSearch(content: string, sourceIdentifier: str
         console.log(`  [SemesterSearch] No sections found for term ${year}-${term}`);
         return;
     }
+
+    const existingSectionCount = (db.query(
+        `SELECT COUNT(*) AS count FROM Section WHERE year = ? AND term = ?`
+    ).get(year, term) as { count: number }).count;
+    const minimumSectionCount = Math.max(1, Math.floor(existingSectionCount * 0.5));
+    if (existingSectionCount > 0 && sections.length < minimumSectionCount) {
+        console.warn(
+            `  [SemesterSearch] Refusing suspiciously small parse for ${sourceIdentifier}: ` +
+            `${sections.length} sections found, ${existingSectionCount} already stored`
+        );
+        return;
+    }
     
     // Prepare insert statements
     const insertSection = db.prepare(`
@@ -325,6 +337,27 @@ export async function parseSemesterSearch(content: string, sourceIdentifier: str
                 sch.type, sch.days, sch.time, sch.start, sch.end, sch.room, sch.instructor
             );
         }
+
+        const scheduleKeys = schedules.map(() => '(?, ?, ?, ?)').join(', ');
+        db.run(
+            `DELETE FROM ScheduleEntry
+             WHERE year = ? AND term = ?
+               AND (subject, courseCode, crn, scheduleIndex) NOT IN (${scheduleKeys})`,
+            [year, term, ...schedules.flatMap(schedule => [
+                schedule.subject,
+                schedule.courseCode,
+                schedule.crn,
+                schedule.scheduleIndex,
+            ])],
+        );
+
+        const sectionKeys = sections.map(() => '(?, ?, ?)').join(', ');
+        db.run(
+            `DELETE FROM Section
+             WHERE year = ? AND term = ?
+               AND (subject, courseCode, crn) NOT IN (${sectionKeys})`,
+                        [year, term, ...sections.flatMap(section => [section.subject, section.courseCode, section.crn])],
+        );
     })();
     
     console.log(`  [SemesterSearch] Parsed term ${year}-${term} - ${sections.length} sections, ${schedules.length} schedules`);
