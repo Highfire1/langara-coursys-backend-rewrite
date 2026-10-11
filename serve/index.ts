@@ -121,7 +121,7 @@ function rebuildCourseCache() {
             LEFT JOIN latest_attribute la
                    ON la.subject = c.subject AND la.courseCode = c.courseCode
         `);
-        console.log("_CourseCache rebuilt");
+        // console.log("_CourseCache rebuilt");
     } catch (e) {
         console.error("Failed to rebuild _CourseCache:", e);
     }

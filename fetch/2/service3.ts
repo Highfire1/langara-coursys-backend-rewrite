@@ -15,6 +15,10 @@ import {
 const db = new Database("./data/database.sqlite");
 applySQLitePragmas(db);
 
+// Bump this when parser behavior changes in a way that requires existing
+// snapshots to be reprocessed without downloading them again.
+const PARSER_VERSION = "semester-snapshot-reconciliation-v1";
+
 function isSqliteBusyError(error: unknown): boolean {
     const e = error as { code?: string; message?: string };
     return e?.code === "SQLITE_BUSY" || e?.message?.includes("database is locked") === true;
@@ -153,6 +157,42 @@ db.run(`
 // Create indexes for ScheduleEntry
 db.run(`CREATE INDEX IF NOT EXISTS idx_schedule_crn ON ScheduleEntry(crn)`);
 db.run(`CREATE INDEX IF NOT EXISTS idx_schedule_year_term ON ScheduleEntry(year, term)`);
+
+db.run(`
+    CREATE TABLE IF NOT EXISTS ParserState (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )
+`);
+
+const parserVersion = (db.query(
+    `SELECT value FROM ParserState WHERE key = 'parser_version'`
+).get() as { value: string } | undefined)?.value;
+
+if (parserVersion !== PARSER_VERSION) {
+    db.transaction(() => {
+        // Reparse only the newest saved snapshot for each semester search source.
+        // The parser cleanup then reconciles Section and ScheduleEntry with that
+        // snapshot, without refetching any remote content.
+        db.run(`
+            UPDATE SourceFetched
+            SET parsed = 0
+            WHERE id IN (
+                SELECT MAX(sf.id)
+                FROM SourceFetched sf
+                INNER JOIN Source s ON s.id = sf.sourceId
+                WHERE s.sourceType = 'SemesterSearch'
+                GROUP BY sf.sourceId
+            )
+        `);
+        db.run(
+            `INSERT INTO ParserState (key, value) VALUES ('parser_version', ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+            [PARSER_VERSION],
+        );
+    })();
+    console.log(`[Parser] Queued latest SemesterSearch snapshots for ${PARSER_VERSION}`);
+}
 
 // Create LangaraCourseDetail table for data scraped from langara.ca course pages
 db.run(`
