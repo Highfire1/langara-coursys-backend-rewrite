@@ -35,7 +35,15 @@ export async function parseTransferCredits(content: string, sourceIdentifier: st
     // Parse the JSON content
     const data: TransferData = JSON.parse(content);
     
-    // Prepare insert statement
+    const source = db.query(
+        `SELECT sourceId FROM SourceFetched WHERE id = ?`
+    ).get(sourceId) as { sourceId: number } | undefined;
+    if (!source) {
+        throw new Error(`[TransferCredits] SourceFetched record ${sourceId} was not found`);
+    }
+
+    // Replace the previous snapshot for this logical source. Transfer rows are
+    // snapshot data, so appending here causes every refresh to duplicate them.
     const insertStmt = db.prepare(`
         INSERT INTO Transfer (
             sourceId, subject, courseNumber, source, sourceCredits, sourceTitle,
@@ -47,6 +55,14 @@ export async function parseTransferCredits(content: string, sourceIdentifier: st
     
     // Process each transfer agreement
     db.transaction(() => {
+        db.run(
+            `DELETE FROM Transfer
+             WHERE sourceId IN (
+                 SELECT id FROM SourceFetched WHERE sourceId = ?
+             )`,
+            [source.sourceId],
+        );
+
         for (const raw of data.transfers) {
             insertStmt.run(
                 sourceId,

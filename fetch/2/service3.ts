@@ -18,6 +18,7 @@ applySQLitePragmas(db);
 // Bump this when parser behavior changes in a way that requires existing
 // snapshots to be reprocessed without downloading them again.
 const PARSER_VERSION = "semester-snapshot-reconciliation-v1";
+const TRANSFER_RECONCILIATION_VERSION = "transfer-snapshot-reconciliation-v1";
 
 function isSqliteBusyError(error: unknown): boolean {
     const e = error as { code?: string; message?: string };
@@ -164,6 +165,33 @@ db.run(`
         value TEXT NOT NULL
     )
 `);
+
+const transferReconciliationVersion = (db.query(
+    `SELECT value FROM ParserState WHERE key = 'transfer_reconciliation_version'`
+).get() as { value: string } | undefined)?.value;
+
+if (transferReconciliationVersion !== TRANSFER_RECONCILIATION_VERSION) {
+    db.transaction(() => {
+        // Older parser runs appended each snapshot. Keep one row for each
+        // agreement while the next snapshot is reconciled by the parser.
+        db.run(`
+            DELETE FROM Transfer
+            WHERE id NOT IN (
+                SELECT MAX(id)
+                FROM Transfer
+                GROUP BY subject, courseNumber, source, sourceCredits,
+                         sourceTitle, destination, destinationName, credit,
+                         condition, effectiveStart, effectiveEnd
+            )
+        `);
+        db.run(
+            `INSERT INTO ParserState (key, value) VALUES ('transfer_reconciliation_version', ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+            [TRANSFER_RECONCILIATION_VERSION],
+        );
+    })();
+    console.log(`[Parser] Reconciled duplicate transfer rows for ${TRANSFER_RECONCILIATION_VERSION}`);
+}
 
 const parserVersion = (db.query(
     `SELECT value FROM ParserState WHERE key = 'parser_version'`
