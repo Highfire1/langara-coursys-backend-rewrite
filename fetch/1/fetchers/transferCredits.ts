@@ -43,6 +43,20 @@ interface PageResponse {
     courses: CourseData[];
 }
 
+function isPageResponse(value: unknown): value is PageResponse {
+    if (!value || typeof value !== "object") return false;
+    const page = value as Partial<PageResponse>;
+    return Number.isInteger(page.currentPage)
+        && Number.isInteger(page.totalPages)
+        && typeof page.totalAgreements === "number"
+        && Array.isArray(page.courses)
+        && page.courses.every(course =>
+            course !== null
+            && typeof course === "object"
+            && Array.isArray(course.agreements)
+        );
+}
+
 // Cached wpnonce - expires after 24 hours, we refresh at 23 hours to be safe
 let cachedNonce: string | null = null;
 let nonceFetchedAt: number = 0;
@@ -112,11 +126,28 @@ async function getSubjectPage(
     });
     
     const responseText = await response.text();
+    if (!response.ok) {
+        throw new Error(
+            `[TransferCredits] Subject ${subjectTitle} page ${page} failed: ` +
+            `${response.status} ${response.statusText}`
+        );
+    }
+
     try {
-        return JSON.parse(responseText) as PageResponse;
+        const data: unknown = JSON.parse(responseText);
+        if (!isPageResponse(data)) {
+            const keys = data && typeof data === "object" ? Object.keys(data) : [];
+            throw new Error(
+                `[TransferCredits] Unexpected response shape for ${subjectTitle} page ${page}; ` +
+                `keys: ${keys.join(", ") || "none"}`
+            );
+        }
+        return data;
     } catch (error) {
+        if (error instanceof Error && error.message.startsWith("[TransferCredits] Unexpected response shape")) {
+            throw error;
+        }
         console.error("[TransferCredits] Failed to parse JSON response:", error);
-        console.error("[TransferCredits] Response text:", responseText);
         throw new Error("[TransferCredits] Unable to parse response as JSON");
     }
 }

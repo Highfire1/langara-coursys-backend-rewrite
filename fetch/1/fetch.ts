@@ -159,6 +159,11 @@ async function processSource(source: Source): Promise<void> {
         console.log(`  Saved: ${contentLink}`);
     } catch (error) {
         console.error(`  Error processing source ${source.id}:`, error);
+        const retryAt = new Date(Date.now() + Math.min(source.fetchFrequency * 3_600_000, 3_600_000));
+        db.run(
+            `UPDATE Source SET nextFetch = ? WHERE id = ?`,
+            [retryAt.toISOString(), source.id]
+        );
     }
 }
 
